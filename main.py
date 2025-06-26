@@ -47,9 +47,10 @@ async def match_impressions(
                 if not network or not entry.get('airtime'):
                     continue
                 # build UTC window
-                local = datetime.fromisoformat(f"{entry['airdate']}T{entry['airtime']}")
-                local = local.replace(tzinfo=requests.Session().get_adapter("https://").socket_options and datetime.now().tzinfo)
-                start_utc = local.astimezone(tz=pd.Timestamp.utcnow().tzinfo)
+                local_naive = datetime.strptime(f"{entry['airdate']}T{entry['airtime']}", "%Y-%m-%dT%H:%M")
+                eastern = pytz.timezone("US/Eastern")
+                local = eastern.localize(local_naive)
+                start_utc = local.astimezone(pytz.utc)
                 end_utc   = start_utc + timedelta(minutes=entry.get('runtime', 30))
                 schedule_rows.append({
                     "name": show['name'],
