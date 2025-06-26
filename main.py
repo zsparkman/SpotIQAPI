@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 import pandas as pd
 import pytz
 import traceback
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 import requests
 import io
 
@@ -70,9 +70,17 @@ async def match_impressions(
 
         df['matched_program'] = df['timestamp'].apply(find_match)
         matches = df.dropna(subset=['matched_program'])
+        num_matches = len(matches)
 
-        # 5. Return JSON
-        return {"matches": matches[['timestamp','matched_program']].to_dict(orient='records')}
+        # 5. Return structured response
+        if num_matches == 0:
+            return {"status": "no matches found", "matches_found": 0}
+
+        return {
+            "status": "success",
+            "matches_found": num_matches,
+            "matched_impressions": matches[['timestamp', 'matched_program']].to_dict(orient='records')
+        }
 
     except Exception as e:
         print("ERROR:", e)
