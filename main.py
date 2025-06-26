@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Request
+from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
 import pandas as pd
 import pytz
@@ -14,27 +14,19 @@ def read_root():
     return {"message": "SpotIQ API is live"}
 
 @app.post("/match")
-async def match_impressions(
-    request: Request,
-    file: UploadFile = File(None)  # allow missing file for raw CSV
-):
+async def match_impressions(file: UploadFile = File(...)):
     try:
-        # 1. Load CSV into DataFrame—either via upload or raw body
-        if file:
-            contents = await file.read()
-            df = pd.read_csv(io.BytesIO(contents))
-        else:
-            # raw CSV mode
-            body = await request.body()
-            df = pd.read_csv(io.BytesIO(body))
+        # Load CSV into DataFrame
+        contents = await file.read()
+        df = pd.read_csv(io.BytesIO(contents))
 
-        # 2. Normalize timestamp column
+        # Normalize timestamp column
         if 'timestamp' not in df.columns:
             return JSONResponse({"error": "Missing 'timestamp' column"}, status_code=400)
         df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
         df.dropna(subset=['timestamp'], inplace=True)
 
-        # 3. Fetch TV schedule for date range in df
+        # Get TV schedule
         first_date = df['timestamp'].dt.date.min().isoformat()
         last_date  = df['timestamp'].dt.date.max().isoformat()
 
@@ -48,7 +40,6 @@ async def match_impressions(
                 network = show.get('network') or show.get('webChannel')
                 if not network or not entry.get('airtime'):
                     continue
-                # build UTC window
                 local_naive = datetime.strptime(f"{entry['airdate']}T{entry['airtime']}", "%Y-%m-%dT%H:%M")
                 eastern = pytz.timezone("US/Eastern")
                 local = eastern.localize(local_naive)
@@ -63,7 +54,7 @@ async def match_impressions(
 
         schedule = pd.DataFrame(schedule_rows)
 
-        # 4. Match each timestamp
+        # Match timestamps
         def find_match(ts):
             for _, row in schedule.iterrows():
                 if row['start'] <= ts <= row['end']:
@@ -73,8 +64,7 @@ async def match_impressions(
         df['matched_program'] = df['timestamp'].apply(find_match)
         matches = df.dropna(subset=['matched_program'])
 
-        # 5. Return JSON
-        return {"matches": matches[['timestamp','matched_program']].to_dict(orient='records')}
+        return {"matches": matches[['timestamp', 'matched_program']].to_dict(orient='records')}
 
     except Exception as e:
         print("ERROR:", e)
