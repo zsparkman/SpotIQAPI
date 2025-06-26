@@ -2,6 +2,7 @@ from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.responses import JSONResponse
 import pandas as pd
 import pytz
+import traceback
 from datetime import datetime, timedelta, date
 import requests
 import io
@@ -76,4 +77,6 @@ async def match_impressions(
         return {"matches": matches[['timestamp','matched_program']].to_dict(orient='records')}
 
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+    print("ERROR:", e)
+    traceback.print_exc()
+    return JSONResponse({"error": str(e)}, status_code=500)
