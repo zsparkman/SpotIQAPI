@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.responses import JSONResponse
 import pandas as pd
 from datetime import datetime, timedelta, date
@@ -12,54 +12,66 @@ def read_root():
     return {"message": "SpotIQ API is live"}
 
 @app.post("/match")
-async def match_impressions(file: UploadFile = File(...)):
+async def match_impressions(
+    request: Request,
+    file: UploadFile = File(None)  # allow missing file for raw CSV
+):
     try:
-        # Load the uploaded CSV file into a DataFrame
-        contents = await file.read()
-        impressions_df = pd.read_csv(io.BytesIO(contents))
-        
-        # Check for required columns
-        if 'timestamp' not in impressions_df.columns:
-            return JSONResponse(content={"error": "Missing 'timestamp' column"}, status_code=400)
+        # 1. Load CSV into DataFrame—either via upload or raw body
+        if file:
+            contents = await file.read()
+            df = pd.read_csv(io.BytesIO(contents))
+        else:
+            # raw CSV mode
+            body = await request.body()
+            df = pd.read_csv(io.BytesIO(body))
 
-        # Parse timestamps
-        impressions_df['timestamp'] = pd.to_datetime(impressions_df['timestamp'], errors='coerce', utc=True)
-        impressions_df.dropna(subset=['timestamp'], inplace=True)
+        # 2. Normalize timestamp column
+        if 'timestamp' not in df.columns:
+            return JSONResponse({"error": "Missing 'timestamp' column"}, status_code=400)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
+        df.dropna(subset=['timestamp'], inplace=True)
 
-        # Fetch today's schedule from TVmaze
-        today = date.today().isoformat()
-        schedule_url = f"https://api.tvmaze.com/schedule?country=US&date={today}"
-        response = requests.get(schedule_url)
-        if response.status_code != 200:
-            return JSONResponse(content={"error": "TV schedule fetch failed"}, status_code=500)
-        tv_data = response.json()
+        # 3. Fetch TV schedule for date range in df
+        first_date = df['timestamp'].dt.date.min().isoformat()
+        last_date  = df['timestamp'].dt.date.max().isoformat()
 
-        # Build schedule DataFrame
-        schedule = []
-        for show in tv_data:
-            start_time = datetime.fromisoformat(f"{show['airdate']}T{show['airtime']}")
-            end_time = start_time + timedelta(minutes=show['runtime'] or 30)
-            schedule.append({
-                "name": show['show']['name'],
-                "network": show['show']['network']['name'] if show['show']['network'] else 'N/A',
-                "start": start_time,
-                "end": end_time
-            })
-        schedule_df = pd.DataFrame(schedule)
+        schedule_rows = []
+        for single_date in pd.date_range(first_date, last_date):
+            url = f"https://api.tvmaze.com/schedule?country=US&date={single_date.date().isoformat()}"
+            resp = requests.get(url)
+            resp.raise_for_status()
+            for entry in resp.json():
+                show = entry['show']
+                network = show.get('network') or show.get('webChannel')
+                if not network or not entry.get('airtime'):
+                    continue
+                # build UTC window
+                local = datetime.fromisoformat(f"{entry['airdate']}T{entry['airtime']}")
+                local = local.replace(tzinfo=requests.Session().get_adapter("https://").socket_options and datetime.now().tzinfo)
+                start_utc = local.astimezone(tz=pd.Timestamp.utcnow().tzinfo)
+                end_utc   = start_utc + timedelta(minutes=entry.get('runtime', 30))
+                schedule_rows.append({
+                    "name": show['name'],
+                    "channel": network['name'],
+                    "start": start_utc,
+                    "end":   end_utc
+                })
 
-        # Match each impression to a show
+        schedule = pd.DataFrame(schedule_rows)
+
+        # 4. Match each timestamp
         def find_match(ts):
-            for _, row in schedule_df.iterrows():
+            for _, row in schedule.iterrows():
                 if row['start'] <= ts <= row['end']:
                     return row['name']
             return None
 
-        impressions_df['matched_program'] = impressions_df['timestamp'].apply(find_match)
-        matches = impressions_df.dropna(subset=['matched_program'])
+        df['matched_program'] = df['timestamp'].apply(find_match)
+        matches = df.dropna(subset=['matched_program'])
 
-        # Return matched records
-        results = matches[['timestamp', 'matched_program']].to_dict(orient='records')
-        return {"matches": results}
+        # 5. Return JSON
+        return {"matches": matches[['timestamp','matched_program']].to_dict(orient='records')}
 
     except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        return JSONResponse({"error": str(e)}, status_code=500)
