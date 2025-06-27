@@ -1,19 +1,22 @@
 import openai
 import os
 
-# Create OpenAI client using environment variable
-client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 def parse_with_gpt(raw_text: str) -> str:
     """
     Takes raw CSV-like text, sends it to GPT to return a cleaned CSV string.
     """
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("Missing OPENAI_API_KEY in environment.")
+
+    client = openai.OpenAI(api_key=api_key)
+
     prompt = f"""You are a data cleaning assistant.
 
 You will be given a raw CSV dump. Your task is to clean and standardize it.
 
 - Output valid CSV format ONLY.
-- Use consistent headers such as: timestamp, creative_id, viewer_id, region, etc.
+- Standardize headers to common terms like: timestamp, creative_id, viewer_id, region.
 - Do NOT include commentary, explanation, JSON, markdown formatting, or code blocks.
 
 Raw CSV input:
@@ -29,4 +32,8 @@ Clean and standardize the output as CSV:"""
         ]
     )
 
-    return response.choices[0].message.content.strip()
+    result = response.choices[0].message.content.strip()
+    if ',' not in result or '\n' not in result:
+        raise ValueError("Unexpected response format from GPT; missing CSV structure.")
+    
+    return result
