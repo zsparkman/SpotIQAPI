@@ -1,58 +1,72 @@
 from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.responses import JSONResponse
-import uvicorn
-import pandas as pd
-from emailer import process_email_attachment, send_report, send_failure_notice
+from emailer import process_email_attachment, send_report, send_error_report
+from job_logger import init_db, log_job, update_job_status
+import uuid
+import traceback
 
 app = FastAPI()
 
+# Initialize the job log database
+init_db()
+
 @app.get("/")
-def health_check():
+def read_root():
     return {"message": "SpotIQ API is live"}
 
 @app.post("/email-inbound")
 async def email_inbound(request: Request):
-    form = await request.form()
-    print(f"Form keys received: {list(form.keys())}")
-
     try:
-        sender_email = form.get("sender") or form.get("from")
-        subject_line = form.get("subject") or form.get("Subject")
-        print(f"Sender: {sender_email}")
-        print(f"Subject: {subject_line}")
+        form = await request.form()
+
+        # Extract sender, subject, attachment
+        sender = form.get("sender", "unknown").strip()
+        subject = form.get("subject", "No Subject").strip()
 
         attachment_count = int(form.get("attachment-count", 0))
         if attachment_count == 0:
-            raise ValueError("No attachments found in the email.")
+            return JSONResponse({"error": "No attachment provided."}, status_code=400)
 
-        first_attachment_key = "attachment-1"
-        file = form.get(first_attachment_key)
-        filename = getattr(file, "filename", "attachment.csv")
-        print(f"Filename: {filename}")
+        # Handle first attachment only
+        file_key = "attachment-1"
+        upload = form.get(file_key)
+        filename = upload.filename if hasattr(upload, "filename") else "unknown"
+        file_bytes = await upload.read()
 
         # Reject PDFs
         if filename.lower().endswith(".pdf"):
-            raise ValueError("PDF files are not supported at this time.")
+            reason = "PDF files are not supported."
+            send_error_report(sender, filename, subject, reason)
+            return JSONResponse({"error": reason}, status_code=400)
 
-        raw_bytes = await file.read()
+        # Generate and log job
+        job_id = str(uuid.uuid4())
+        log_job(job_id, sender, subject, filename)
 
-        # Process and respond
-        df = process_email_attachment(raw_bytes)
-        csv_bytes = df.to_csv(index=False).encode("utf-8")
-        send_report(sender_email, csv_bytes, filename="SpotIQ_Matched_Report.csv")
+        print(f"[email_inbound] Processing job {job_id} from {sender} - {filename}")
 
-        return JSONResponse({"status": "success"}, status_code=200)
+        # Process file
+        df = process_email_attachment(file_bytes)
+
+        # Convert DataFrame to bytes
+        output_csv = df.to_csv(index=False).encode("utf-8")
+
+        # Send report
+        send_report(sender, output_csv, f"SpotIQ_Report_{filename}")
+        update_job_status(job_id, "completed")
+
+        return JSONResponse({"message": f"Report sent to {sender}."})
 
     except Exception as e:
-        error_message = str(e)
-        print(f"[ERROR] Failed to process email: {error_message}")
+        error_msg = str(e)
+        traceback.print_exc()
+        job_id = job_id if "job_id" in locals() else str(uuid.uuid4())
+        sender = sender if "sender" in locals() else "unknown"
+        subject = subject if "subject" in locals() else "Unknown"
+        filename = filename if "filename" in locals() else "unknown"
 
-        try:
-            send_failure_notice(sender_email, subject_line or "Submission Error", error_message)
-        except Exception as email_err:
-            print(f"[ERROR] Failed to send failure notice: {email_err}")
+        # Update job status and notify sender
+        update_job_status(job_id, "failed", error_message=error_msg)
+        send_error_report(sender, filename, subject, error_msg)
 
-        return JSONResponse({"error": error_message}, status_code=500)
-
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=10000)
+        return JSONResponse({"error": error_msg}, status_code=500)
