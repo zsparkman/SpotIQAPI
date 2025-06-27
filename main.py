@@ -8,7 +8,7 @@ import requests
 import io
 
 # Import your parser & matcher modules
-from parser import parse_impressions_with_gpt
+from parser import parse_with_gpt
 from matcher import match_dataframe
 from emailer import process_email_attachment, send_report
 
