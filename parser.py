@@ -3,7 +3,7 @@ import pandas as pd
 import io
 
 # Set your OpenAI API key
-openai.api_key = "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"
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def load_csv(file_path):
     with open(file_path, 'rb') as f:
