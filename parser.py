@@ -1,0 +1,34 @@
+import openai
+import pandas as pd
+import io
+
+# Set your OpenAI API key
+openai.api_key = "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"
+
+def load_csv(file_path):
+    with open(file_path, 'rb') as f:
+        return f.read()
+
+def parse_with_gpt(file_bytes):
+    csv_data = file_bytes.decode('utf-8')
+    prompt = f"""You are a data parsing assistant. The following is a CSV data dump. Read the column names and data and suggest a cleaned format that extracts standardized column headers and parses each row.
+
+CSV:
+{csv_data}
+
+Respond with a JSON array where each object has clearly labeled fields such as 'timestamp', 'creative_id', 'viewer_id', 'region', etc. Infer what the fields should be if unclear."""
+
+    response = openai.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "You are a data parsing assistant."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+    return response.choices[0].message.content
+
+if __name__ == "__main__":
+    file_path = "test_impressions.csv"
+    file_bytes = load_csv(file_path)
+    parsed_output = parse_with_gpt(file_bytes)
+    print(parsed_output)
