@@ -59,8 +59,18 @@ def find_match_with_confidence(ts, schedule):
             else:
                 confidence = 75
                 reason = "Within airing window"
-            return pd.Series([row['name'], confidence, row['channel'], reason])
-    return pd.Series([None, None, None, None])
+            return pd.Series({
+                'matched_program': row['name'],
+                'match_confidence': confidence,
+                'matched_channel': row['channel'],
+                'match_reason': reason
+            })
+    return pd.Series({
+        'matched_program': None,
+        'match_confidence': None,
+        'matched_channel': None,
+        'match_reason': None
+    })
 
 
 @app.post("/match")
@@ -79,7 +89,8 @@ async def match_impressions(file: UploadFile = File(...)):
         last_date = df['timestamp'].dt.date.max().isoformat()
         schedule = build_schedule(first_date, last_date)
 
-        df[['matched_program', 'match_confidence', 'matched_channel', 'match_reason']] = df['timestamp'].apply(lambda ts: find_match_with_confidence(ts, schedule))
+        matches_df = df['timestamp'].apply(lambda ts: find_match_with_confidence(ts, schedule))
+        df = pd.concat([df, matches_df], axis=1)
 
         matches = df.dropna(subset=['matched_program'])
         num_matches = len(matches)
@@ -124,7 +135,8 @@ async def email_inbound(request: Request):
         last_date = df['timestamp'].dt.date.max().isoformat()
         schedule = build_schedule(first_date, last_date)
 
-        df[['matched_program', 'match_confidence', 'matched_channel', 'match_reason']] = df['timestamp'].apply(lambda ts: find_match_with_confidence(ts, schedule))
+        matches_df = df['timestamp'].apply(lambda ts: find_match_with_confidence(ts, schedule))
+        df = pd.concat([df, matches_df], axis=1)
 
         matches = df.dropna(subset=['matched_program'])
 
