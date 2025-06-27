@@ -14,7 +14,6 @@ app = FastAPI()
 def read_root():
     return {"message": "SpotIQ API is live"}
 
-
 def build_schedule(start_date, end_date):
     schedule_rows = []
     for single_date in pd.date_range(start_date, end_date):
@@ -26,7 +25,10 @@ def build_schedule(start_date, end_date):
             network = show.get('network') or show.get('webChannel')
             if not network or not entry.get('airtime'):
                 continue
-            local_naive = datetime.strptime(f"{entry['airdate']}T{entry['airtime']}", "%Y-%m-%dT%H:%M")
+            try:
+                local_naive = datetime.strptime(f"{entry['airdate']}T{entry['airtime']}", "%Y-%m-%dT%H:%M")
+            except Exception:
+                continue
             eastern = pytz.timezone("US/Eastern")
             local = eastern.localize(local_naive)
             runtime = entry.get('runtime', 30)
@@ -41,8 +43,9 @@ def build_schedule(start_date, end_date):
             })
     return pd.DataFrame(schedule_rows)
 
-
 def find_match_with_confidence(ts, schedule):
+    best_match = None
+    highest_conf = 0
     for _, row in schedule.iterrows():
         if row['start'] <= ts <= row['end']:
             time_from_start = (ts - row['start']).total_seconds() / 60
@@ -59,19 +62,10 @@ def find_match_with_confidence(ts, schedule):
             else:
                 confidence = 75
                 reason = "Within airing window"
-            return pd.Series({
-                'matched_program': row['name'],
-                'match_confidence': confidence,
-                'matched_channel': row['channel'],
-                'match_reason': reason
-            })
-    return pd.Series({
-        'matched_program': None,
-        'match_confidence': None,
-        'matched_channel': None,
-        'match_reason': None
-    })
-
+            if confidence > highest_conf:
+                highest_conf = confidence
+                best_match = pd.Series([row['name'], confidence, row['channel'], reason])
+    return best_match if best_match is not None else pd.Series([None, None, None, None])
 
 @app.post("/match")
 async def match_impressions(file: UploadFile = File(...)):
@@ -89,8 +83,7 @@ async def match_impressions(file: UploadFile = File(...)):
         last_date = df['timestamp'].dt.date.max().isoformat()
         schedule = build_schedule(first_date, last_date)
 
-        matches_df = df['timestamp'].apply(lambda ts: find_match_with_confidence(ts, schedule))
-        df = pd.concat([df, matches_df], axis=1)
+        df[['matched_program', 'match_confidence', 'matched_channel', 'match_reason']] = df['timestamp'].apply(lambda ts: find_match_with_confidence(ts, schedule))
 
         matches = df.dropna(subset=['matched_program'])
         num_matches = len(matches)
@@ -109,13 +102,13 @@ async def match_impressions(file: UploadFile = File(...)):
         traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
 
-
 @app.post("/email-inbound")
 async def email_inbound(request: Request):
     try:
         form = await request.form()
+        print("Form keys received:", list(form.keys()))
         sender = form.get("sender") or form.get("from")
-        attachments = form.getlist("attachment")
+        attachments = form.getlist("attachment") or form.getlist("attachment[]")
 
         if not attachments:
             return JSONResponse({"error": "No attachments found"}, status_code=400)
@@ -135,8 +128,7 @@ async def email_inbound(request: Request):
         last_date = df['timestamp'].dt.date.max().isoformat()
         schedule = build_schedule(first_date, last_date)
 
-        matches_df = df['timestamp'].apply(lambda ts: find_match_with_confidence(ts, schedule))
-        df = pd.concat([df, matches_df], axis=1)
+        df[['matched_program', 'match_confidence', 'matched_channel', 'match_reason']] = df['timestamp'].apply(lambda ts: find_match_with_confidence(ts, schedule))
 
         matches = df.dropna(subset=['matched_program'])
 
