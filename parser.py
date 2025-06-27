@@ -1,25 +1,32 @@
-import os
 import openai
-import pandas as pd
+import os
 
-# Correct way to initialize the OpenAI client (>=1.0.0)
+# Create OpenAI client using environment variable
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def parse_with_gpt(raw_text: str) -> str:
-    prompt = f"""You are a data parsing assistant. The following is a CSV data dump. Read the column names and data and suggest a cleaned format that extracts standardized column headers and parses each row.
+    """
+    Takes raw CSV-like text, sends it to GPT to return a cleaned CSV string.
+    """
+    prompt = f"""You are a data cleaning assistant.
 
-CSV:
+You will be given a raw CSV dump. Your task is to clean and standardize it.
+
+- Output valid CSV format ONLY.
+- Use consistent headers such as: timestamp, creative_id, viewer_id, region, etc.
+- Do NOT include commentary, explanation, JSON, markdown formatting, or code blocks.
+
+Raw CSV input:
 {raw_text}
 
-Respond with a CSV-formatted string using clearly labeled fields such as 'timestamp', 'creative_id', 'viewer_id', 'region', etc.
-Infer field meanings if unclear."""
+Clean and standardize the output as CSV:"""
 
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": "You are a data parsing assistant."},
+            {"role": "system", "content": "You are a CSV data cleaner."},
             {"role": "user", "content": prompt}
         ]
     )
 
-    return response.choices[0].message.content
+    return response.choices[0].message.content.strip()
