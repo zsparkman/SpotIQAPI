@@ -6,6 +6,7 @@ import traceback
 from datetime import datetime, timedelta
 import requests
 import io
+from emailer import process_email_attachment, send_report
 
 app = FastAPI()
 
@@ -15,80 +16,100 @@ def read_root():
 
 @app.post("/match")
 async def match_impressions(file: UploadFile = File(...)):
+    contents = await file.read()
+    df = pd.read_csv(io.BytesIO(contents))
+    return run_match(df)
+
+@app.post("/email-inbound")
+async def email_inbound(request: Request, file: UploadFile = File(...)):
     try:
-        contents = await file.read()
-        df = pd.read_csv(io.BytesIO(contents))
+        raw_bytes = await file.read()
+        df = process_email_attachment(raw_bytes)
 
-        if 'timestamp' not in df.columns:
-            return JSONResponse({"error": "Missing 'timestamp' column"}, status_code=400)
+        form = await request.form()
+        sender = form.get("sender") or form.get("from")
+        if not sender:
+            raise RuntimeError("Missing sender email")
 
-        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
-        df.dropna(subset=['timestamp'], inplace=True)
+        match_df = run_match(df, return_df=True)
+        csv_bytes = match_df.to_csv(index=False).encode("utf-8")
 
-        first_date = df['timestamp'].dt.date.min().isoformat()
-        last_date = df['timestamp'].dt.date.max().isoformat()
-        schedule_rows = []
+        send_report(to_email=sender, report_bytes=csv_bytes, filename="SpotIQ_Report.csv")
 
-        for single_date in pd.date_range(first_date, last_date):
-            url = f"https://api.tvmaze.com/schedule?country=US&date={single_date.date().isoformat()}"
-            resp = requests.get(url)
-            resp.raise_for_status()
-            for entry in resp.json():
-                show = entry['show']
-                network = show.get('network') or show.get('webChannel')
-                if not network or not entry.get('airtime'):
-                    continue
-                local_naive = datetime.strptime(f"{entry['airdate']}T{entry['airtime']}", "%Y-%m-%dT%H:%M")
-                eastern = pytz.timezone("US/Eastern")
-                local = eastern.localize(local_naive)
-                runtime = entry.get('runtime', 30)
-                start_utc = local.astimezone(pytz.utc)
-                end_utc = start_utc + timedelta(minutes=runtime)
-                schedule_rows.append({
-                    "name": show['name'],
-                    "channel": network['name'],
-                    "start": start_utc,
-                    "end": end_utc,
-                    "runtime": runtime
-                })
-
-        schedule = pd.DataFrame(schedule_rows)
-
-        def find_match_with_confidence(ts):
-            for _, row in schedule.iterrows():
-                if row['start'] <= ts <= row['end']:
-                    time_from_start = (ts - row['start']).total_seconds() / 60
-                    time_to_end = (row['end'] - ts).total_seconds() / 60
-                    if time_from_start <= 5:
-                        confidence = 100
-                        reason = "Within first 5 minutes of airing"
-                    elif time_from_start <= 10:
-                        confidence = 90
-                        reason = "Within first 10 minutes of airing"
-                    elif time_to_end <= 5:
-                        confidence = 60
-                        reason = "Near end of program"
-                    else:
-                        confidence = 75
-                        reason = "Within airing window"
-                    return pd.Series([row['name'], confidence, row['channel'], reason])
-            return pd.Series([None, None, None, None])
-
-        df[['matched_program', 'match_confidence', 'matched_channel', 'match_reason']] = df['timestamp'].apply(find_match_with_confidence)
-
-        matches = df.dropna(subset=['matched_program'])
-        num_matches = len(matches)
-
-        if num_matches == 0:
-            return {"status": "no matches found", "matches_found": 0}
-
-        return {
-            "status": "success",
-            "matches_found": num_matches,
-            "matched_impressions": matches[['timestamp', 'matched_program', 'matched_channel', 'match_confidence', 'match_reason']].to_dict(orient='records')
-        }
+        return {"status": "email processed", "matches_found": len(match_df)}
 
     except Exception as e:
-        print("ERROR:", e)
+        print("EMAIL ERROR:", e)
         traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
+
+def run_match(df, return_df=False):
+    if 'timestamp' not in df.columns:
+        raise ValueError("Missing 'timestamp' column")
+
+    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
+    df.dropna(subset=['timestamp'], inplace=True)
+
+    first_date = df['timestamp'].dt.date.min().isoformat()
+    last_date = df['timestamp'].dt.date.max().isoformat()
+    schedule_rows = []
+
+    for single_date in pd.date_range(first_date, last_date):
+        url = f"https://api.tvmaze.com/schedule?country=US&date={single_date.date().isoformat()}"
+        resp = requests.get(url)
+        resp.raise_for_status()
+        for entry in resp.json():
+            show = entry['show']
+            network = show.get('network') or show.get('webChannel')
+            if not network or not entry.get('airtime'):
+                continue
+            local_naive = datetime.strptime(f"{entry['airdate']}T{entry['airtime']}", "%Y-%m-%dT%H:%M")
+            eastern = pytz.timezone("US/Eastern")
+            local = eastern.localize(local_naive)
+            runtime = entry.get('runtime', 30)
+            start_utc = local.astimezone(pytz.utc)
+            end_utc = start_utc + timedelta(minutes=runtime)
+            schedule_rows.append({
+                "name": show['name'],
+                "channel": network['name'],
+                "start": start_utc,
+                "end": end_utc,
+                "runtime": runtime
+            })
+
+    schedule = pd.DataFrame(schedule_rows)
+
+    def find_match_with_confidence(ts):
+        for _, row in schedule.iterrows():
+            if row['start'] <= ts <= row['end']:
+                time_from_start = (ts - row['start']).total_seconds() / 60
+                time_to_end = (row['end'] - ts).total_seconds() / 60
+                if time_from_start <= 5:
+                    confidence = 100
+                    reason = "Within first 5 minutes of airing"
+                elif time_from_start <= 10:
+                    confidence = 90
+                    reason = "Within first 10 minutes of airing"
+                elif time_to_end <= 5:
+                    confidence = 60
+                    reason = "Near end of program"
+                else:
+                    confidence = 75
+                    reason = "Within airing window"
+                return pd.Series([row['name'], confidence, row['channel'], reason])
+        return pd.Series([None, None, None, None])
+
+    df[['matched_program', 'match_confidence', 'matched_channel', 'match_reason']] = df['timestamp'].apply(find_match_with_confidence)
+
+    matches = df.dropna(subset=['matched_program'])
+    if return_df:
+        return matches[['timestamp', 'matched_program', 'matched_channel', 'match_confidence', 'match_reason']]
+
+    if matches.empty:
+        return {"status": "no matches found", "matches_found": 0}
+
+    return {
+        "status": "success",
+        "matches_found": len(matches),
+        "matched_impressions": matches[['timestamp', 'matched_program', 'matched_channel', 'match_confidence', 'match_reason']].to_dict(orient='records')
+    }
