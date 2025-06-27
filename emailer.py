@@ -2,11 +2,11 @@
 
 import io
 import pandas as pd
-from parser import parse_impressions_with_gpt
+from parser import parse_with_gpt
 
 def process_email_attachment(raw_bytes: bytes) -> pd.DataFrame:
     """
-    Decode the raw attachment bytes, send the text to parser.parse_impressions_with_gpt(),
+    Decode the raw attachment bytes, send the text to parser.parse_with_gpt(),
     then read the returned CSV text into a DataFrame.
     
     :param raw_bytes: the raw bytes of the uploaded impressions file
@@ -16,7 +16,7 @@ def process_email_attachment(raw_bytes: bytes) -> pd.DataFrame:
     raw_text = raw_bytes.decode("utf-8", errors="ignore")
     
     # 2) Send to your GPT-powered parser
-    parsed_csv = parse_impressions_with_gpt(raw_text)
+    parsed_csv = parse_with_gpt(raw_text)
     
     # 3) Load the CSV text into a DataFrame
     df = pd.read_csv(io.StringIO(parsed_csv))
