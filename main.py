@@ -63,3 +63,91 @@ def find_match_with_confidence(ts, schedule):
                 confidence = 75
                 reason = "Within airing window"
             if confidence > highest_conf:
+                highest_conf = confidence
+                best_match = pd.Series([row['name'], confidence, row['channel'], reason])
+    return best_match if best_match is not None else pd.Series([None, None, None, None])
+
+@app.post("/match")
+async def match_impressions(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        df = pd.read_csv(io.BytesIO(contents))
+
+        if 'timestamp' not in df.columns:
+            return JSONResponse({"error": "Missing 'timestamp' column"}, status_code=400)
+
+        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
+        df.dropna(subset=['timestamp'], inplace=True)
+
+        first_date = df['timestamp'].dt.date.min().isoformat()
+        last_date = df['timestamp'].dt.date.max().isoformat()
+        schedule = build_schedule(first_date, last_date)
+
+        df[['matched_program', 'match_confidence', 'matched_channel', 'match_reason']] = df['timestamp'].apply(lambda ts: find_match_with_confidence(ts, schedule))
+
+        matches = df.dropna(subset=['matched_program'])
+        num_matches = len(matches)
+
+        if num_matches == 0:
+            return {"status": "no matches found", "matches_found": 0}
+
+        return {
+            "status": "success",
+            "matches_found": num_matches,
+            "matched_impressions": matches[['timestamp', 'matched_program', 'matched_channel', 'match_confidence', 'match_reason']].to_dict(orient='records')
+        }
+
+    except Exception as e:
+        print("ERROR:", e)
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/email-inbound")
+async def email_inbound(request: Request):
+    try:
+        form = await request.form()
+        print("Form keys received:", list(form.keys()))
+        sender = form.get("sender") or form.get("from")
+        attachments = form.getlist("attachment") or form.getlist("attachment[]")
+
+        if not attachments:
+            return JSONResponse({"error": "No attachments found"}, status_code=400)
+
+        upload = attachments[0]
+        raw_bytes = await upload.read()
+
+        df = process_email_attachment(raw_bytes)
+
+        if 'timestamp' not in df.columns:
+            return JSONResponse({"error": "Missing 'timestamp' column"}, status_code=400)
+
+        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
+        df.dropna(subset=['timestamp'], inplace=True)
+
+        first_date = df['timestamp'].dt.date.min().isoformat()
+        last_date = df['timestamp'].dt.date.max().isoformat()
+        schedule = build_schedule(first_date, last_date)
+
+        df[['matched_program', 'match_confidence', 'matched_channel', 'match_reason']] = df['timestamp'].apply(lambda ts: find_match_with_confidence(ts, schedule))
+
+        matches = df.dropna(subset=['matched_program'])
+
+        csv_buf = io.StringIO()
+        matches.to_csv(csv_buf, index=False)
+        csv_bytes = csv_buf.getvalue().encode("utf-8")
+
+        send_report(
+            to_email=sender,
+            report_bytes=csv_bytes,
+            filename="SpotIQ_Report.csv"
+        )
+
+        return {
+            "status": "processed",
+            "matches_found": len(matches)
+        }
+
+    except Exception as e:
+        print("EMAIL ERROR:", e)
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
