@@ -7,19 +7,22 @@ from datetime import datetime, timedelta
 import requests
 import io
 
-# Import parser and emailer
-from parser import parse_with_gpt
 from emailer import process_email_attachment, send_report
 
 app = FastAPI()
 
-def match_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    # Normalize timestamp
-    if 'timestamp' not in df.columns:
-        raise ValueError("Missing 'timestamp' column")
-    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
-    df.dropna(subset=['timestamp'], inplace=True)
+@app.get("/")
+def read_root():
+    return {"message": "SpotIQ API is live"}
 
+
+def match_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Match timestamps from the given DataFrame to TV show schedules.
+
+    :param df: DataFrame with a 'timestamp' column in UTC
+    :return: DataFrame with a new 'matched_program' column
+    """
     first_date = df['timestamp'].dt.date.min().isoformat()
     last_date = df['timestamp'].dt.date.max().isoformat()
 
@@ -34,12 +37,14 @@ def match_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             if not network or not entry.get('airtime'):
                 continue
 
-            local_naive = datetime.strptime(
-                f"{entry['airdate']}T{entry['airtime']}", "%Y-%m-%dT%H:%M"
-            )
+            local_naive = datetime.strptime(f"{entry['airdate']}T{entry['airtime']}", "%Y-%m-%dT%H:%M")
             eastern = pytz.timezone("US/Eastern")
             local = eastern.localize(local_naive)
-            runtime = entry.get('runtime') or 30
+
+            runtime = entry.get('runtime')
+            if not isinstance(runtime, int):
+                runtime = 30  # default fallback
+
             start_utc = local.astimezone(pytz.utc)
             end_utc = start_utc + timedelta(minutes=runtime)
 
@@ -61,40 +66,54 @@ def match_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     df['matched_program'] = df['timestamp'].apply(find_match)
     return df.dropna(subset=['matched_program'])
 
-@app.get("/")
-def read_root():
-    return {"message": "SpotIQ API is live"}
 
 @app.post("/match")
 async def match_impressions(file: UploadFile = File(...)):
     try:
         contents = await file.read()
         df = pd.read_csv(io.BytesIO(contents))
+
+        if 'timestamp' not in df.columns:
+            return JSONResponse({"error": "Missing 'timestamp' column"}, status_code=400)
+
+        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
+        df.dropna(subset=['timestamp'], inplace=True)
+
         results_df = match_dataframe(df)
         num = len(results_df)
+
         if num == 0:
             return {"status": "no matches found", "matches_found": 0}
+
         return {
             "status": "success",
             "matches_found": num,
-            "matched_impressions": results_df[['timestamp', 'matched_program']].to_dict(orient='records')
+            "matched_impressions": results_df.to_dict(orient='records')
         }
+
     except Exception as e:
         print("ERROR:", e)
         traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
 @app.post("/email-inbound")
-async def email_inbound(request: Request, file: UploadFile = File(...)):
+async def email_inbound(request: Request):
     try:
+        form = await request.form()
+
+        sender = form.get("sender") or form.get("from")
+        file: UploadFile = form.get("attachment-1")
+        if not file:
+            return JSONResponse({"error": "Missing attachment"}, status_code=400)
+
         raw_bytes = await file.read()
+
         df = process_email_attachment(raw_bytes)
         results_df = match_dataframe(df)
 
-        form = await request.form()
-        sender = form.get("sender") or form.get("from")
         if sender:
-            csv_bytes = results_df[['timestamp', 'matched_program']].to_csv(index=False).encode("utf-8")
+            csv_bytes = results_df.to_csv(index=False).encode("utf-8")
             send_report(
                 to_email=sender,
                 report_bytes=csv_bytes,
@@ -102,6 +121,7 @@ async def email_inbound(request: Request, file: UploadFile = File(...)):
             )
 
         return {"status": "processed", "matches_found": len(results_df)}
+
     except Exception as e:
         print("EMAIL ERROR:", e)
         traceback.print_exc()
