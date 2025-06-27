@@ -14,12 +14,15 @@ def process_email_attachment(raw_bytes: bytes) -> pd.DataFrame:
     Decode the raw attachment bytes, send the text to parser.parse_with_gpt(),
     then read the returned CSV text into a DataFrame.
     """
-    raw_text = raw_bytes.decode("utf-8", errors="ignore")
-    parsed_csv = parse_with_gpt(raw_text)
-    df = pd.read_csv(io.StringIO(parsed_csv))
-    df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True, errors='coerce')
-    df.dropna(subset=['timestamp'], inplace=True)
-    return df
+    try:
+        raw_text = raw_bytes.decode("utf-8", errors="ignore")
+        parsed_csv = parse_with_gpt(raw_text)
+        df = pd.read_csv(io.StringIO(parsed_csv))
+        df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True, errors='coerce')
+        df.dropna(subset=['timestamp'], inplace=True)
+        return df
+    except Exception as e:
+        raise RuntimeError(f"Failed to process email attachment: {e}")
 
 def send_report(to_email: str, report_bytes: bytes, filename: str):
     """
@@ -45,4 +48,4 @@ def send_report(to_email: str, report_bytes: bytes, filename: str):
     )
 
     if response.status_code != 200:
-        raise RuntimeError(f"Failed to send email: {response.text}")
+        raise RuntimeError(f"Failed to send email: {response.status_code} - {response.text}")
