@@ -108,14 +108,17 @@ async def email_inbound(request: Request):
         form = await request.form()
         print("Form keys received:", list(form.keys()))
         sender = form.get("sender") or form.get("from")
-        attachments = form.getlist("attachment") or form.getlist("attachment[]")
+        print("Sender:", sender)
+
+        attachments = [form[k] for k in form.keys() if k.startswith("attachment-")]
 
         if not attachments:
             return JSONResponse({"error": "No attachments found"}, status_code=400)
 
         upload = attachments[0]
-        raw_bytes = await upload.read()
+        print("Filename:", getattr(upload, "filename", "Unknown"))
 
+        raw_bytes = await upload.read()
         df = process_email_attachment(raw_bytes)
 
         if 'timestamp' not in df.columns:
