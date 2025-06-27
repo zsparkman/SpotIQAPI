@@ -3,8 +3,8 @@ import pandas as pd
 import io
 import os
 
-# Set your OpenAI API key
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Explicitly create an OpenAI client
+client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def load_csv(file_path):
     with open(file_path, 'rb') as f:
@@ -21,7 +21,7 @@ CSV:
 Respond with a CSV with standardized columns like 'timestamp', 'creative_id', 'viewer_id', 'region', etc. If a field is unclear, infer what it should be and label it clearly.
 """
 
-    response = openai.chat.completions.create(
+    response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "You are a helpful data parsing assistant."},
