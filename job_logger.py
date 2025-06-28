@@ -49,20 +49,6 @@ def get_all_jobs():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM jobs ORDER BY created_at DESC")
-    rows = cursor.fetchall()
+    jobs = cursor.fetchall()
     conn.close()
-    return [dict(zip(
-        ["job_id", "sender", "subject", "filename", "status", "created_at", "updated_at", "error_message"], row
-    )) for row in rows]
-
-def get_job_by_id(job_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return dict(zip(
-            ["job_id", "sender", "subject", "filename", "status", "created_at", "updated_at", "error_message"], row
-        ))
-    return None
+    return jobs
