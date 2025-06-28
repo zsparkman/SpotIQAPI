@@ -4,27 +4,55 @@ import io
 import os
 import pandas as pd
 import requests
-from parser import parse_with_gpt
+import tempfile
+from load_parsers import get_parser
+from main_parser import save_to_unhandled
+# from parser import parse_with_gpt  # Optional GPT fallback if desired
 
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
 
 def process_email_attachment(raw_bytes: bytes) -> pd.DataFrame:
     """
-    Decode the raw attachment bytes, send the text to parser.parse_with_gpt(),
-    then read the returned CSV text into a DataFrame.
+    Try parsing with dynamic parser. If no parser is found, save to unhandled_logs.
+    Optional: fallback to GPT if explicitly allowed.
     """
-    try:
-        raw_text = raw_bytes.decode("utf-8", errors="ignore")
-        print("[process_email_attachment] Raw text decoded. Sending to GPT.")
-        parsed_csv = parse_with_gpt(raw_text)
-        df = pd.read_csv(io.StringIO(parsed_csv))
-        df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True, errors='coerce')
-        df.dropna(subset=['timestamp'], inplace=True)
-        return df
-    except Exception as e:
-        print(f"[process_email_attachment] ERROR: {e}")
-        raise RuntimeError(f"Failed to process email attachment: {e}")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+        tmp.write(raw_bytes)
+        tmp_path = tmp.name
+
+    file_name = os.path.basename(tmp_path)
+    parser_func = get_parser(file_name)
+
+    if parser_func:
+        try:
+            print(f"[✓] Found parser for {file_name}. Running it.")
+            records = parser_func(tmp_path)
+            df = pd.DataFrame(records)
+            df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True, errors='coerce')
+            df.dropna(subset=['timestamp'], inplace=True)
+            return df
+        except Exception as e:
+            print(f"[x] Parser failed for {file_name}: {e}")
+            save_to_unhandled(tmp_path)
+            raise RuntimeError("Parser failed. File saved for training.")
+    else:
+        print(f"[!] No parser available for {file_name}.")
+        save_to_unhandled(tmp_path)
+
+        # Optional GPT fallback
+        # try:
+        #     raw_text = raw_bytes.decode("utf-8", errors="ignore")
+        #     print("[fallback] Sending to GPT fallback.")
+        #     parsed_csv = parse_with_gpt(raw_text)
+        #     df = pd.read_csv(io.StringIO(parsed_csv))
+        #     df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True, errors='coerce')
+        #     df.dropna(subset=['timestamp'], inplace=True)
+        #     return df
+        # except Exception as e:
+        #     raise RuntimeError(f"GPT fallback also failed: {e}")
+
+        raise RuntimeError("No parser found. File saved for training.")
 
 def send_report(to_email: str, report_bytes: bytes, filename: str):
     """
