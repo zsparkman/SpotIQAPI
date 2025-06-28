@@ -49,24 +49,4 @@ async def email_inbound(request: Request):
 
         job_id = str(uuid.uuid4())
         log_job(job_id, sender, subject, filename)
-        print(f"[email_inbound] Processing job {job_id} from {sender} - {filename}")
-
-        df = process_email_attachment(file_bytes)
-        output_csv = df.to_csv(index=False).encode("utf-8")
-        send_report(sender, output_csv, f"SpotIQ_Report_{filename}")
-        update_job_status(job_id, "completed")
-
-        return JSONResponse({"message": f"Report sent to {sender}."})
-
-    except Exception as e:
-        error_msg = str(e)
-        traceback.print_exc()
-        job_id = job_id if "job_id" in locals() else str(uuid.uuid4())
-        sender = sender if "sender" in locals() else "unknown"
-        subject = subject if "subject" in locals() else "Unknown"
-        filename = filename if "filename" in locals() else "unknown"
-
-        update_job_status(job_id, "failed", error_message=error_msg)
-        send_error_report(sender, filename, subject, error_msg)
-
-        return JSONResponse({"error": error_msg}, status_code=500)
+        print(f"[email_inbound] Processing job_]()
