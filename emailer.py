@@ -48,12 +48,22 @@ def send_report(to_email: str, report_bytes: bytes, filename: str):
     if response.status_code != 200:
         raise RuntimeError(f"Failed to send email: {response.status_code} - {response.text}")
 
-def send_error_report(to_email: str, error_message: str):
+def send_error_report(to_email: str, filename: str, subject: str, error_message: str):
     """
-    Sends an error report to the user if their email could not be processed.
+    Sends an error message email to the user.
     """
     if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
         raise RuntimeError("Missing Mailgun config: MAILGUN_DOMAIN or MAILGUN_API_KEY")
+
+    message = f"""We were unable to process your file.
+
+File: {filename}
+Subject: {subject}
+
+Error:
+{error_message}
+
+Please review and try again, or contact support."""
 
     response = requests.post(
         f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
@@ -61,8 +71,8 @@ def send_error_report(to_email: str, error_message: str):
         data={
             "from": f"SpotIQ <mailer@{MAILGUN_DOMAIN}>",
             "to": [to_email],
-            "subject": "SpotIQ Error Processing Your Submission",
-            "text": f"Unfortunately, we were unable to process your submission.\n\nReason:\n{error_message}\n\nPlease review and try again."
+            "subject": "SpotIQ Processing Failed",
+            "text": message
         }
     )
 
