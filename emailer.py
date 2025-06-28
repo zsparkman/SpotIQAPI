@@ -1,29 +1,36 @@
-# emailer.py
-
 import io
 import os
 import pandas as pd
 import requests
+import tempfile
+from main_parser import match_parser, save_to_unhandled
 from parser import parse_with_gpt
-from main_parser import save_to_unhandled
 
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
 
+
 def process_email_attachment(raw_bytes: bytes) -> pd.DataFrame:
     try:
-        raw_text = raw_bytes.decode("utf-8", errors="ignore")
-        print("[process_email_attachment] Raw text decoded. Sending to GPT.")
-        parsed_csv = parse_with_gpt(raw_text)
-        df = pd.read_csv(io.StringIO(parsed_csv))
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+            tmp.write(raw_bytes)
+            tmp_path = tmp.name
+
+        df = match_parser(tmp_path)
+        if df is None:
+            print("[process_email_attachment] No parser matched. Falling back to GPT.")
+            raw_text = raw_bytes.decode("utf-8", errors="ignore")
+            parsed_csv = parse_with_gpt(raw_text)
+            df = pd.read_csv(io.StringIO(parsed_csv))
+
         df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True, errors='coerce')
         df.dropna(subset=['timestamp'], inplace=True)
         return df
+
     except Exception as e:
         print(f"[process_email_attachment] ERROR: {e}")
-        filename = "unknown.csv"
-        save_to_unhandled(raw_bytes, filename)
-        raise RuntimeError("No parser found. File saved for training.")
+        raise RuntimeError(f"Failed to process email attachment: {e}")
+
 
 def send_report(to_email: str, report_bytes: bytes, filename: str):
     if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
@@ -43,6 +50,7 @@ def send_report(to_email: str, report_bytes: bytes, filename: str):
 
     if response.status_code != 200:
         raise RuntimeError(f"Failed to send email: {response.status_code} - {response.text}")
+
 
 def send_error_report(to_email: str, filename: str, subject: str, error_message: str):
     if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
