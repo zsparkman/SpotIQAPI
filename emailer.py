@@ -5,46 +5,45 @@ import os
 import pandas as pd
 import requests
 from parser import parse_with_gpt
-from load_parsers import load_all_parsers
-from parsers_registry import get_parser_for_content
 from main_parser import save_to_unhandled
+from load_parsers import load_all_parsers
 
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
 
-# Load all available parsers at startup
-PARSERS = load_all_parsers()
+def process_email_attachment(raw_bytes: bytes) -> pd.DataFrame:
+    """
+    Try to parse the attachment using a known parser.
+    If none work, fallback to GPT.
+    If that fails, save the unhandled log.
+    """
+    raw_text = raw_bytes.decode("utf-8", errors="ignore")
+    filename = "unknown.csv"
 
-def process_email_attachment(file_bytes: bytes) -> pd.DataFrame:
-    """
-    Attempt to parse the attachment using a known parser.
-    If no parser matches, fallback to GPT. If GPT fails, save to unhandled.
-    """
+    # Try all loaded custom parsers
     try:
-        raw_text = file_bytes.decode("utf-8", errors="ignore")
-        df = None
-
-        parser_func = get_parser_for_content(raw_text, PARSERS)
-        if parser_func:
+        for parser_func in load_all_parsers():
             try:
-                df = parser_func(raw_text)
-            except Exception as e:
-                print(f"[!] Parser matched but failed: {e}")
-                save_to_unhandled("fallback_failed.csv", file_bytes)
-                raise RuntimeError("Matched parser failed. Sent to unhandled logs.")
+                df = parser_func(raw_bytes)
+                if not df.empty:
+                    print("[process_email_attachment] Parsed using custom parser.")
+                    return df
+            except Exception as parse_error:
+                print(f"[parser error] {parse_error}")
+    except Exception as e:
+        print(f"[parser loading error] {e}")
 
-        if df is None:
-            print("[*] No parser matched. Using GPT.")
-            parsed_csv = parse_with_gpt(raw_text)
-            df = pd.read_csv(io.StringIO(parsed_csv))
-
+    # Fallback to GPT
+    try:
+        print("[GPT fallback] No parser matched, using GPT.")
+        parsed_csv = parse_with_gpt(raw_text)
+        df = pd.read_csv(io.StringIO(parsed_csv))
         df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True, errors='coerce')
         df.dropna(subset=['timestamp'], inplace=True)
         return df
-
-    except Exception as e:
-        print(f"[process_email_attachment] ERROR: {e}")
-        save_to_unhandled("unhandled_fallback.csv", file_bytes)
+    except Exception as gpt_error:
+        print(f"[GPT error] {gpt_error}")
+        save_to_unhandled(filename, raw_bytes)
         raise RuntimeError("No parser found. File saved for training.")
 
 def send_report(to_email: str, report_bytes: bytes, filename: str):
