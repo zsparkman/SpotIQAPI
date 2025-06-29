@@ -3,7 +3,8 @@ import os
 import pandas as pd
 import requests
 import tempfile
-from main_parser import match_parser, save_to_unhandled
+from load_parsers import get_parser
+from main_parser import save_to_unhandled
 from parser import parse_with_gpt
 
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
@@ -16,8 +17,12 @@ def process_email_attachment(raw_bytes: bytes) -> pd.DataFrame:
             tmp.write(raw_bytes)
             tmp_path = tmp.name
 
-        df = match_parser(tmp_path)
-        if df is None:
+        parser_func = get_parser(os.path.basename(tmp_path))
+        if parser_func:
+            print("[process_email_attachment] Found parser. Using it.")
+            records = parser_func(tmp_path)
+            df = pd.DataFrame(records)
+        else:
             print("[process_email_attachment] No parser matched. Falling back to GPT.")
             raw_text = raw_bytes.decode("utf-8", errors="ignore")
             parsed_csv = parse_with_gpt(raw_text)
@@ -29,6 +34,7 @@ def process_email_attachment(raw_bytes: bytes) -> pd.DataFrame:
 
     except Exception as e:
         print(f"[process_email_attachment] ERROR: {e}")
+        save_to_unhandled(tmp_path)
         raise RuntimeError(f"Failed to process email attachment: {e}")
 
 
