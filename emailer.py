@@ -4,51 +4,46 @@ import io
 import os
 import pandas as pd
 import requests
-from load_parsers import load_all_parsers
-from main_parser import save_to_unhandled
 from parser import parse_with_gpt
+from load_parsers import load_all_parsers
+from main_parser import get_parser_output, save_to_unhandled
 
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
 
-# Load parsers on module import
-PARSERS = load_all_parsers()
-
 def process_email_attachment(raw_bytes: bytes, filename: str) -> pd.DataFrame:
     """
-    Attempt to parse the file using known parsers. If none match, fallback to GPT
-    and log the unhandled file.
+    Attempt to parse using available parsers. If none succeed, fall back to GPT.
+    In both cases, save the raw log to unhandled_logs for future training.
     """
-    try:
-        raw_text = raw_bytes.decode("utf-8", errors="ignore")
-    except Exception as e:
-        raise RuntimeError(f"Failed to decode file: {e}")
+    raw_text = raw_bytes.decode("utf-8", errors="ignore")
+    parsers = load_all_parsers()
 
-    for parser in PARSERS:
+    for parser_func in parsers:
         try:
-            df = parser(raw_text)
+            df = get_parser_output(parser_func, raw_text)
             df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True, errors='coerce')
             df.dropna(subset=['timestamp'], inplace=True)
-            print(f"[process_email_attachment] Parsed using {parser.__name__}")
             return df
-        except Exception as e:
-            print(f"[process_email_attachment] Parser {parser.__name__} failed: {e}")
+        except Exception:
             continue
 
-    # Fallback to GPT if no parser succeeds
-    print("[process_email_attachment] No matching parser found. Using GPT.")
     try:
         parsed_csv = parse_with_gpt(raw_text)
         df = pd.read_csv(io.StringIO(parsed_csv))
         df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True, errors='coerce')
         df.dropna(subset=['timestamp'], inplace=True)
+        save_to_unhandled(filename, raw_text)  # Save for future training
         return df
     except Exception as e:
-        print(f"[process_email_attachment] GPT parsing failed: {e}")
-        save_to_unhandled(filename, raw_text)
-        raise RuntimeError("No parser found. File saved for training.")
+        print(f"[process_email_attachment] ERROR: {e}")
+        save_to_unhandled(filename, raw_text)  # Save on total failure
+        raise RuntimeError("Failed to process email attachment via parsers and GPT fallback.")
 
 def send_report(to_email: str, report_bytes: bytes, filename: str):
+    """
+    Sends the matched report as an attachment back to the sender via Mailgun.
+    """
     if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
         raise RuntimeError("Missing Mailgun config: MAILGUN_DOMAIN or MAILGUN_API_KEY")
 
@@ -68,6 +63,9 @@ def send_report(to_email: str, report_bytes: bytes, filename: str):
         raise RuntimeError(f"Failed to send email: {response.status_code} - {response.text}")
 
 def send_error_report(to_email: str, filename: str, subject: str, error_message: str):
+    """
+    Sends an error message email to the user.
+    """
     if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
         raise RuntimeError("Missing Mailgun config: MAILGUN_DOMAIN or MAILGUN_API_KEY")
 
