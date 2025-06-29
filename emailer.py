@@ -1,5 +1,6 @@
 import io
 import os
+import base64
 import pandas as pd
 import requests
 import tempfile
@@ -9,6 +10,33 @@ from parser import parse_with_gpt
 
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
+
+
+def push_unhandled_to_github(file_bytes: bytes, filename: str):
+    token = os.getenv("GITHUB_TOKEN")
+    repo = os.getenv("GITHUB_REPO")
+    branch = os.getenv("GITHUB_BRANCH", "main")
+
+    url = f"https://api.github.com/repos/{repo}/contents/unhandled_logs/{filename}"
+    encoded = base64.b64encode(file_bytes).decode("utf-8")
+
+    data = {
+        "message": f"Add unhandled log: {filename}",
+        "content": encoded,
+        "branch": branch
+    }
+
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    response = requests.put(url, headers=headers, json=data)
+
+    if response.status_code not in (200, 201):
+        raise RuntimeError(f"GitHub upload failed: {response.status_code} - {response.text}")
+    else:
+        print(f"[✓] Unhandled log pushed to GitHub: {filename}")
 
 
 def process_email_attachment(raw_bytes: bytes) -> pd.DataFrame:
@@ -30,12 +58,8 @@ def process_email_attachment(raw_bytes: bytes) -> pd.DataFrame:
             parsed_csv = parse_with_gpt(raw_text)
             df = pd.read_csv(io.StringIO(parsed_csv))
 
-            # Save raw file to unhandled_logs for training
-            os.makedirs("unhandled_logs", exist_ok=True)
-            save_path = os.path.join("unhandled_logs", filename)
-            with open(save_path, "wb") as f:
-                f.write(raw_bytes)
-            print(f"[process_email_attachment] Saved to unhandled_logs: {save_path}")
+            # Push raw file to GitHub for training
+            push_unhandled_to_github(raw_bytes, filename)
 
         df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True, errors='coerce')
         df.dropna(subset=['timestamp'], inplace=True)
