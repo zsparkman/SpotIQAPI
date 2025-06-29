@@ -106,8 +106,8 @@ def main():
 
         try:
             try:
-                with open(log_path, "r") as f:
-                    sample = "".join([next(f) for _ in range(20)])
+                with open(log_path, "rb") as f:
+                    sample = f.read(2048).decode("utf-8", errors="ignore")
             except Exception as read_err:
                 print(f"[!] Failed to read {file_name}: {read_err}")
                 continue
