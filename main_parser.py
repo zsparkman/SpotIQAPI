@@ -2,6 +2,7 @@
 
 import os
 import hashlib
+import pandas as pd
 
 PARSERS_DIR = "parsers"
 
@@ -39,3 +40,12 @@ def save_to_unhandled(filename: str, content: bytes):
     with open(filepath, "wb") as f:
         f.write(content)
     print(f"[↪] Saved unhandled log to {filepath}")
+
+def get_parser_output(parser_func, raw_text: str) -> pd.DataFrame:
+    """
+    Executes the provided parser function on raw text to produce a DataFrame.
+    """
+    df = parser_func(raw_text)
+    if not isinstance(df, pd.DataFrame):
+        raise ValueError("Parser function did not return a DataFrame.")
+    return df
