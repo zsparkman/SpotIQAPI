@@ -26,3 +26,16 @@ def save_parser_to_repo(fingerprint: str, parser_code: str) -> str:
         f.write(parser_code)
 
     return filepath
+
+def save_to_unhandled(filename: str, content: bytes):
+    """
+    Saves an unrecognized file to the unhandled_logs directory for later review/training.
+    """
+    unhandled_dir = "unhandled_logs"
+    if not os.path.exists(unhandled_dir):
+        os.makedirs(unhandled_dir)
+
+    filepath = os.path.join(unhandled_dir, filename)
+    with open(filepath, "wb") as f:
+        f.write(content)
+    print(f"[↪] Saved unhandled log to {filepath}")
