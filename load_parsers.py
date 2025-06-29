@@ -1,6 +1,5 @@
 import os
 import importlib.util
-from parsers_registry import get_parser_for_file
 
 PARSERS_DIR = "parsers"
 
@@ -15,10 +14,3 @@ def load_all_parsers():
             spec.loader.exec_module(module)
             parser_map[module_name] = module.parse
     return parser_map
-
-def get_parser(file_name):
-    parser_name = get_parser_for_file(file_name)
-    if not parser_name:
-        return None
-    parser_map = load_all_parsers()
-    return parser_map.get(parser_name)
