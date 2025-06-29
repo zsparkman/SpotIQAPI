@@ -17,7 +17,9 @@ def process_email_attachment(raw_bytes: bytes) -> pd.DataFrame:
             tmp.write(raw_bytes)
             tmp_path = tmp.name
 
-        parser_func = get_parser(os.path.basename(tmp_path))
+        filename = os.path.basename(tmp_path)
+        parser_func = get_parser(filename)
+
         if parser_func:
             print("[process_email_attachment] Found parser. Using it.")
             records = parser_func(tmp_path)
@@ -28,13 +30,19 @@ def process_email_attachment(raw_bytes: bytes) -> pd.DataFrame:
             parsed_csv = parse_with_gpt(raw_text)
             df = pd.read_csv(io.StringIO(parsed_csv))
 
+            # Save raw file to unhandled_logs for training
+            os.makedirs("unhandled_logs", exist_ok=True)
+            save_path = os.path.join("unhandled_logs", filename)
+            with open(save_path, "wb") as f:
+                f.write(raw_bytes)
+            print(f"[process_email_attachment] Saved to unhandled_logs: {save_path}")
+
         df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True, errors='coerce')
         df.dropna(subset=['timestamp'], inplace=True)
         return df
 
     except Exception as e:
         print(f"[process_email_attachment] ERROR: {e}")
-        save_to_unhandled(tmp_path)
         raise RuntimeError(f"Failed to process email attachment: {e}")
 
 
