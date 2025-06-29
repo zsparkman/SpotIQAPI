@@ -66,6 +66,5 @@ async def email_inbound(request: Request):
         filename = filename if "filename" in locals() else "unknown"
 
         update_job_status(job_id, "failed", error_message=error_msg)
-        send_error_report(sender, filename, subject, error_msg)
-
+        
         return JSONResponse({"error": error_msg}, status_code=500)
