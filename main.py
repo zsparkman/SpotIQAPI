@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, HTMLResponse
-from emailer import process_email_attachment, send_report, send_error_report
+from emailer import process_email_attachment, send_error_report
 from job_logger import init_db, log_job, update_job_status, get_all_jobs
 import uuid
 import traceback
@@ -52,11 +52,10 @@ async def email_inbound(request: Request):
         print(f"[email_inbound] Processing job {job_id} from {sender} - {filename}")
 
         df = process_email_attachment(file_bytes)
-        output_csv = df.to_csv(index=False).encode("utf-8")
-        send_report(sender, output_csv, f"SpotIQ_Report_{filename}")
-        update_job_status(job_id, "completed")
+        print(f"[email_inbound] Parsed {len(df)} rows.")
 
-        return JSONResponse({"message": f"Report sent to {sender}."})
+        update_job_status(job_id, "completed")
+        return JSONResponse({"message": f"Parsed {len(df)} rows for {sender}."})
 
     except Exception as e:
         error_msg = str(e)
