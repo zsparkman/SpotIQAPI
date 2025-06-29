@@ -63,4 +63,29 @@ def main():
     os.makedirs(PARSERS_DIR, exist_ok=True)
     os.makedirs(UNHANDLED_DIR, exist_ok=True)
 
-    registry
+    registry = load_registry()
+
+    for file_name in os.listdir(UNHANDLED_DIR):
+        log_path = os.path.join(UNHANDLED_DIR, file_name)
+
+        try:
+            with open(log_path, "r") as f:
+                sample = "".join([next(f) for _ in range(20)])
+
+            parser_name = f"parser_{file_name.replace('.', '_')}_{int(datetime.utcnow().timestamp())}"
+            code = generate_parser_code(sample)
+            parser_path = write_parser_code(code, parser_name)
+
+            if test_parser(parser_path, log_path):
+                registry[file_name] = parser_name
+                save_registry(registry)
+                print(f"[✓] Added parser: {parser_name}")
+                os.remove(log_path)
+            else:
+                print(f"[x] Failed to validate parser for: {file_name}")
+
+        except Exception as e:
+            print(f"[!] Error handling {file_name}: {e}")
+
+if __name__ == "__main__":
+    main()
