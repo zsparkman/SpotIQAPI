@@ -102,10 +102,15 @@ def main():
 
     for file_name in os.listdir(UNHANDLED_DIR):
         log_path = os.path.join(UNHANDLED_DIR, file_name)
+        print(f"[DEBUG] Handling file: {file_name}")
 
         try:
-            with open(log_path, "r") as f:
-                sample = "".join([next(f) for _ in range(20)])
+            try:
+                with open(log_path, "r") as f:
+                    sample = "".join([next(f) for _ in range(20)])
+            except Exception as read_err:
+                print(f"[!] Failed to read {file_name}: {read_err}")
+                continue
 
             parser_name = f"parser_{file_name.replace('.', '_')}_{int(datetime.utcnow().timestamp())}"
             code = generate_parser_code(sample)
@@ -115,14 +120,12 @@ def main():
                 registry[file_name] = parser_name
                 save_registry(registry)
 
-                # Push new parser file
                 push_file_to_github(
                     local_path=parser_path,
                     remote_path=f"parsers/{parser_name}.py",
                     commit_message=f"Add parser: {parser_name}"
                 )
 
-                # Push updated registry
                 push_file_to_github(
                     local_path=REGISTRY_FILE,
                     remote_path="parsers_registry.json",
