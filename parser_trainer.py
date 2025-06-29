@@ -6,6 +6,7 @@ from datetime import datetime
 from openai import OpenAI
 import traceback
 import requests
+import hashlib
 
 UNHANDLED_DIR = "unhandled_logs"
 PARSERS_DIR = "parsers"
@@ -13,6 +14,10 @@ REGISTRY_FILE = "parsers_registry.json"
 OPENAI_MODEL = "gpt-4"
 
 client = OpenAI()
+
+
+def compute_fingerprint(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def load_registry():
@@ -112,12 +117,17 @@ def main():
                 print(f"[!] Failed to read {file_name}: {read_err}")
                 continue
 
+            fingerprint = compute_fingerprint(sample)
+            if fingerprint in registry:
+                print(f"[~] Fingerprint already registered: {fingerprint}")
+                continue
+
             parser_name = f"parser_{file_name.replace('.', '_')}_{int(datetime.utcnow().timestamp())}"
             code = generate_parser_code(sample)
             parser_path = write_parser_code(code, parser_name)
 
             if test_parser(parser_path, log_path):
-                registry[file_name] = parser_name
+                registry[fingerprint] = parser_name
                 save_registry(registry)
 
                 push_file_to_github(
