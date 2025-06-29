@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, HTMLResponse
-from emailer import process_email_attachment, send_error_report
+from emailer import process_email_attachment
 from job_logger import init_db, log_job, update_job_status, get_all_jobs
 import uuid
 import traceback
