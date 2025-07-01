@@ -2,7 +2,8 @@ import os
 import openai
 import pandas as pd
 import hashlib
-from main_parser import fingerprint_csv
+from main_parser import get_parser_output, save_to_unhandled
+from parsers_registry import compute_fingerprint
 from s3_utils import upload_parser_module
 import boto3
 from io import BytesIO
@@ -91,8 +92,9 @@ def handle_unprocessed_files():
         try:
             file_obj = s3_client.get_object(Bucket=S3_BUCKET, Key=key)
             raw_bytes = file_obj["Body"].read()
-            df = pd.read_csv(BytesIO(raw_bytes))
+            raw_text = raw_bytes.decode("utf-8", errors="ignore")
 
+            df = pd.read_csv(BytesIO(raw_bytes))
             if df.empty or df.shape[1] < 2:
                 print(f"[trainer] Skipped {filename} - empty or invalid structure.")
                 continue
@@ -104,13 +106,13 @@ def handle_unprocessed_files():
                 compile(parser_code, "<generated_parser>", "exec")
             except SyntaxError as e:
                 print(f"[trainer] Invalid parser skipped: {e}")
-                fingerprint = fingerprint_csv(df)
+                fingerprint = compute_fingerprint(raw_text)
                 fail_path = os.path.join(FAILED_DIR, f"{fingerprint}.py")
                 with open(fail_path, "w") as f:
                     f.write(parser_code)
                 continue
 
-            fingerprint = fingerprint_csv(df)
+            fingerprint = compute_fingerprint(raw_text)
             parser_filename = f"{fingerprint}.py"
             parser_path = os.path.join(PARSERS_DIR, parser_filename)
 
