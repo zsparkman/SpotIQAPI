@@ -1,51 +1,70 @@
-from fastapi import FastAPI, UploadFile, File, Request
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, HTMLResponse
 from emailer import process_email_attachment, send_report, send_error_report
-from job_logger import log_job
+from job_logger import init_db, log_job, update_job_status, get_all_jobs
 import uuid
 import traceback
-import io
 
 app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+init_db()
 
 @app.get("/")
 def read_root():
-    return {"message": "SpotIQ API is live."}
+    return {"message": "SpotIQ API is live"}
 
 @app.get("/jobs")
-def read_jobs():
-    return {"message": "Job endpoint is working."}
+def list_jobs():
+    jobs = get_all_jobs()
+    html = "<h1>SpotIQ Job Log</h1><table border='1'><tr><th>Job ID</th><th>Sender</th><th>Subject</th><th>Filename</th><th>Status</th><th>Created At</th><th>Updated At</th><th>Error</th></tr>"
+    for job in jobs:
+        html += "<tr>" + "".join(f"<td>{c or ''}</td>" for c in job) + "</tr>"
+    html += "</table>"
+    return HTMLResponse(content=html)
 
 @app.post("/email-inbound")
-async def email_inbound(request: Request, file: UploadFile = File(...)):
-    job_id = str(uuid.uuid4())
-    sender = request.headers.get("X-Sender", "unknown")
-    subject = request.headers.get("X-Subject", "no-subject")
-    filename = file.filename
-
-    print(f"[email_inbound] Processing job {job_id} from {sender} - {filename}")
-
+async def email_inbound(request: Request):
     try:
-        file_bytes = await file.read()
+        form = await request.form()
+
+        sender = form.get("sender", "unknown").strip()
+        subject = form.get("subject", "No Subject").strip()
+
+        attachment_count = int(form.get("attachment-count", 0))
+        if attachment_count == 0:
+            reason = "No attachment provided."
+            send_error_report(sender, "unknown", subject, reason)
+            return JSONResponse({"error": reason}, status_code=400)
+
+        file_key = "attachment-1"
+        upload = form.get(file_key)
+        filename = upload.filename if hasattr(upload, "filename") else "unknown"
+        file_bytes = await upload.read()
+
+        if filename.lower().endswith(".pdf"):
+            reason = "PDF files are not supported."
+            send_error_report(sender, filename, subject, reason)
+            return JSONResponse({"error": reason}, status_code=400)
+
+        job_id = str(uuid.uuid4())
+        log_job(job_id, sender, subject, filename)
+        print(f"[email_inbound] Processing job {job_id} from {sender} - {filename}")
+
         df = process_email_attachment(file_bytes, filename)
-        print(f"[email_inbound] Processed DataFrame: {df.head()}")
-        csv_bytes = df.to_csv(index=False).encode("utf-8")
-        send_report(sender, csv_bytes, filename)
-        log_job(job_id, sender, subject, filename, "success")
-        return JSONResponse(content={"message": "File processed successfully."}, status_code=200)
+        output_csv = df.to_csv(index=False).encode("utf-8")
+        send_report(sender, output_csv, f"SpotIQ_Report_{filename}")
+        update_job_status(job_id, "completed")
+
+        return JSONResponse({"message": f"Report sent to {sender}."})
+
     except Exception as e:
         error_msg = str(e)
-        print(f"[email_inbound] ERROR: {error_msg}")
         traceback.print_exc()
+        job_id = job_id if "job_id" in locals() else str(uuid.uuid4())
+        sender = sender if "sender" in locals() else "unknown"
+        subject = subject if "subject" in locals() else "Unknown"
+        filename = filename if "filename" in locals() else "unknown"
+
+        update_job_status(job_id, "failed", error_message=error_msg)
         send_error_report(sender, filename, subject, error_msg)
-        log_job(job_id, sender, subject, filename, "failed", error_msg)
-        return JSONResponse(content={"message": "Failed to process file."}, status_code=500)
+
+        return JSONResponse({"error": error_msg}, status_code=500)
