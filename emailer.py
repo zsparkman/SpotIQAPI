@@ -56,4 +56,43 @@ def send_report(to_email: str, report_bytes: bytes, filename: str):
     if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
         raise RuntimeError("Missing Mailgun config")
 
-    r
+    response = requests.post(
+        f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
+        auth=("api", MAILGUN_API_KEY),
+        files=[("attachment", (filename, report_bytes))],
+        data={
+            "from": f"SpotIQ <mailer@{MAILGUN_DOMAIN}>",
+            "to": [to_email],
+            "subject": "Your SpotIQ Matched Report",
+            "text": "Attached is your SpotIQ match report as a CSV file."
+        }
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"Failed to send email: {response.status_code} - {response.text}")
+
+def send_error_report(to_email: str, filename: str, subject: str, error_message: str):
+    if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
+        raise RuntimeError("Missing Mailgun config")
+
+    message = f"""We were unable to process your file.
+
+File: {filename}
+Subject: {subject}
+
+Error:
+{error_message}
+
+Please review and try again, or contact support."""
+
+    response = requests.post(
+        f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
+        auth=("api", MAILGUN_API_KEY),
+        data={
+            "from": f"SpotIQ <mailer@{MAILGUN_DOMAIN}>",
+            "to": [to_email],
+            "subject": "SpotIQ Processing Failed",
+            "text": message
+        }
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"Failed to send error email: {response.status_code} - {response.text}")
