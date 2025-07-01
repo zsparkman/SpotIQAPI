@@ -1,6 +1,7 @@
 import os
 import hashlib
 import pandas as pd
+from s3_utils import upload_unhandled_log
 
 PARSERS_DIR = "parsers"
 
@@ -22,13 +23,19 @@ def save_parser_to_repo(fingerprint: str, parser_code: str) -> str:
 
 def save_to_unhandled(filename: str, content: bytes):
     unhandled_dir = "unhandled_logs"
-    if not os.path.exists(unhandled_dir):
-        os.makedirs(unhandled_dir)
+    os.makedirs(unhandled_dir, exist_ok=True)
 
     filepath = os.path.join(unhandled_dir, filename)
     with open(filepath, "wb") as f:
         f.write(content)
+
     print(f"[↪] Saved unhandled log to {filepath}")
+    
+    # Also upload to S3
+    try:
+        upload_unhandled_log(filename, content)
+    except Exception as e:
+        print(f"[✖] Failed to upload unhandled log to S3: {e}")
 
 def get_parser_output(parser_func, raw_text: str) -> pd.DataFrame:
     df = parser_func(raw_text)
