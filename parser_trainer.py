@@ -24,7 +24,14 @@ PARSERS_DIR = "parsers"
 os.makedirs(PARSERS_DIR, exist_ok=True)
 
 # === AWS S3 setup ===
-s3_client = boto3.client("s3", region_name=AWS_REGION)
+aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
+aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+s3_client = boto3.client(
+    "s3",
+    region_name=AWS_REGION,
+    aws_access_key_id=aws_access_key,
+    aws_secret_access_key=aws_secret_key,
+)
 
 # === GitHub setup ===
 gh = Github(GITHUB_TOKEN)
@@ -70,6 +77,10 @@ def move_s3_object(old_key, new_key):
     s3_client.delete_object(Bucket=S3_BUCKET, Key=old_key)
 
 
+def sanitize_filename(name: str) -> str:
+    return "".join(c if c.isalnum() or c in "-_.()" else "_" for c in name)
+
+
 def handle_unprocessed_files():
     response = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=UNHANDLED_PREFIX)
     if "Contents" not in response:
@@ -82,6 +93,7 @@ def handle_unprocessed_files():
             continue
 
         filename = key.split("/")[-1]
+        safe_filename = sanitize_filename(filename)
         print(f"[trainer] Handling {filename}")
 
         try:
@@ -113,14 +125,14 @@ def handle_unprocessed_files():
                 )
 
             # Move file to handled_logs in S3
-            new_key = f"{HANDLED_PREFIX}{filename}"
+            new_key = f"{HANDLED_PREFIX}{safe_filename}"
             move_s3_object(key, new_key)
 
             # Commit handled log to GitHub
             commit_to_github(
-                filepath=f"{HANDLED_PREFIX}/{filename}",
+                filepath=f"{HANDLED_PREFIX}/{safe_filename}",
                 content=raw_bytes.decode("utf-8", errors="ignore"),
-                commit_msg=f"Move handled log {filename}"
+                commit_msg=f"Move handled log {safe_filename}"
             )
 
             print(f"[trainer] Trained and committed parser: {parser_filename}")
