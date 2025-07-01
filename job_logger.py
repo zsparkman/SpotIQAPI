@@ -1,54 +1,47 @@
-import sqlite3
 import os
+import json
+import boto3
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "jobs.db")
+S3_BUCKET = os.getenv("S3_BUCKET_NAME")
+JOB_LOG_KEY = "job_logs/jobs.json"
+
+s3_client = boto3.client(
+    "s3",
+    region_name=os.getenv("AWS_REGION", "us-east-2"),
+    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+)
+
+def _load_job_log():
+    try:
+        obj = s3_client.get_object(Bucket=S3_BUCKET, Key=JOB_LOG_KEY)
+        return json.loads(obj["Body"].read().decode("utf-8"))
+    except s3_client.exceptions.NoSuchKey:
+        return []
+    except Exception as e:
+        print(f"[job_logger] Failed to load job log: {e}")
+        return []
+
+def _save_job_log(jobs):
+    try:
+        s3_client.put_object(
+            Bucket=S3_BUCKET,
+            Key=JOB_LOG_KEY,
+            Body=json.dumps(jobs, indent=2).encode("utf-8")
+        )
+    except Exception as e:
+        print(f"[job_logger] Failed to save job log: {e}")
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS jobs (
-            job_id TEXT PRIMARY KEY,
-            sender TEXT,
-            subject TEXT,
-            filename TEXT,
-            status TEXT,
-            created_at TEXT,
-            updated_at TEXT,
-            error_message TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+    # No-op to preserve compatibility
+    pass
 
 def log_job(job_id, sender, subject, filename):
+    jobs = _load_job_log()
     now = datetime.utcnow().isoformat()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO jobs (job_id, sender, subject, filename, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (job_id, sender, subject, filename, "processing", now, now))
-    conn.commit()
-    conn.close()
-
-def update_job_status(job_id, status, error_message=None):
-    now = datetime.utcnow().isoformat()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE jobs
-        SET status = ?, updated_at = ?, error_message = ?
-        WHERE job_id = ?
-    """, (status, now, error_message, job_id))
-    conn.commit()
-    conn.close()
-
-def get_all_jobs():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM jobs ORDER BY created_at DESC")
-    jobs = cursor.fetchall()
-    conn.close()
-    return jobs
+    jobs.append({
+        "job_id": job_id,
+        "sender": sender,
+        "subject": subject,
+        "filen
