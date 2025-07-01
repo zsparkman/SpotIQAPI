@@ -30,28 +30,38 @@ s3_client = boto3.client(
 client = openai.OpenAI()
 
 def generate_parser_code(columns: list) -> str:
-    col_list = ", ".join(columns)
+    col_list = ", ".join([f'"{col}"' for col in columns])
     prompt = f"""You are a Python developer.
 
-Write a Python function called `parse` that takes a pandas DataFrame as input and returns a cleaned DataFrame.
-The returned DataFrame must include these exact columns: {col_list}.
+Write a Python function called `parse` that accepts a string of CSV text as input and returns a cleaned pandas DataFrame.
 
-Your function must:
+It should:
+- Load the CSV string into a DataFrame using pd.read_csv(io.StringIO(...))
 - Drop completely empty rows
 - Normalize column names to lowercase
-- Rename columns to exactly: {col_list}
+- Rename columns to exactly: {columns}
+- Return the cleaned DataFrame
 
-Wrap the function in valid Python syntax and indent properly.
-Do not use markdown or explanation — only valid Python code.
+Only return valid Python code. No markdown. No explanation. No comments.
 """
+
     response = client.chat.completions.create(
         model="gpt-4-turbo",
         messages=[
-            {"role": "system", "content": "You write clean Python code using pandas."},
+            {"role": "system", "content": "You return valid, importable Python code."},
             {"role": "user", "content": prompt}
         ]
     )
-    return response.choices[0].message.content.strip()
+
+    code = response.choices[0].message.content.strip()
+
+    # Clean up if GPT includes triple-backtick fences
+    if code.startswith("```"):
+        code = code.split("```")[1].strip()
+        if code.startswith("python"):
+            code = "\n".join(code.splitlines()[1:])
+
+    return code
 
 def move_s3_object(old_key, new_key):
     s3_client.copy_object(Bucket=S3_BUCKET, CopySource={'Bucket': S3_BUCKET, 'Key': old_key}, Key=new_key)
