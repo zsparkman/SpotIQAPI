@@ -1,74 +1,95 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, HTMLResponse
-from emailer import process_email_attachment, send_report, send_error_report
-from job_logger import init_db, log_job, update_job_status, get_all_jobs
-import uuid
-import traceback
+import io
+import os
+import pandas as pd
+import requests
+import threading
+from parser import parse_with_gpt
+from main_parser import get_parser_output, save_to_unhandled
+from parsers_registry import compute_fingerprint
+from load_parsers import load_all_parsers
+from parser_trainer import handle_unprocessed_files
+from job_logger import update_job_status
 
-app = FastAPI()
-init_db()
+MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
+MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
 
-@app.get("/")
-def read_root():
-    return {"message": "SpotIQ API is live"}
-
-@app.get("/jobs")
-def list_jobs():
-    jobs = get_all_jobs()
-    html = (
-        "<h1>SpotIQ Job Log</h1><table border='1'>"
-        "<tr><th>Job ID</th><th>Sender</th><th>Subject</th><th>Filename</th><th>Status</th>"
-        "<th>Created At</th><th>Updated At</th><th>Error</th><th>Last Rebuild</th>"
-        "<th>Parsed By</th><th>Parser Name</th></tr>"
-    )
-    for job in jobs:
-        html += "<tr>" + "".join(f"<td>{c or ''}</td>" for c in job) + "</tr>"
-    html += "</table>"
-    return HTMLResponse(content=html)
-
-@app.post("/email-inbound")
-async def email_inbound(request: Request):
-    job_id = str(uuid.uuid4())
+def process_email_attachment(raw_bytes: bytes, filename: str):
     try:
-        form = await request.form()
+        print("[process_email_attachment] Attempting parser match...")
+        raw_text = raw_bytes.decode("utf-8", errors="ignore")
+        fingerprint = compute_fingerprint(raw_text)
+        parser_func = load_all_parsers().get(fingerprint)
 
-        sender = form.get("sender", "unknown").strip()
-        subject = form.get("subject", "No Subject").strip()
+        if not parser_func:
+            raise ValueError(f"No parser found for fingerprint: {fingerprint}")
 
-        attachment_count = int(form.get("attachment-count", 0))
-        if attachment_count == 0:
-            reason = "No attachment provided."
-            send_error_report(sender, "unknown", subject, reason)
-            return JSONResponse({"error": reason}, status_code=400)
+        df = get_parser_output(parser_func, raw_text)
+        print("[process_email_attachment] Matched parser succeeded.")
+        return df, "parser", f"{fingerprint}.py"
 
-        file_key = "attachment-1"
-        upload = form.get(file_key)
-        filename = upload.filename if hasattr(upload, "filename") else "unknown"
-        file_bytes = await upload.read()
+    except Exception as parser_err:
+        print(f"[process_email_attachment] No parser matched: {parser_err}")
+        try:
+            raw_text = raw_bytes.decode("utf-8", errors="ignore")
+            parsed_csv = parse_with_gpt(raw_text)
+            df = pd.read_csv(io.StringIO(parsed_csv))
+            df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True, errors='coerce')
+            df.dropna(subset=['timestamp'], inplace=True)
 
-        if filename.lower().endswith(".pdf"):
-            reason = "PDF files are not supported."
-            send_error_report(sender, filename, subject, reason)
-            return JSONResponse({"error": reason}, status_code=400)
+            save_to_unhandled(filename, raw_bytes)
+            threading.Thread(target=handle_unprocessed_files, daemon=True).start()
 
-        log_job(job_id, sender, subject, filename)
-        print(f"[email_inbound] Processing job {job_id} from {sender} - {filename}")
+            print("[process_email_attachment] Fallback to GPT succeeded.")
+            return df, "gpt", None
 
-        df, parsed_by, parser_name = process_email_attachment(file_bytes, filename)
-        output_csv = df.to_csv(index=False).encode("utf-8")
-        send_report(sender, output_csv, f"SpotIQ_Report_{filename}")
-        update_job_status(job_id, "completed", parsed_by=parsed_by, parser_name=parser_name)
+        except Exception as gpt_err:
+            print(f"[process_email_attachment] GPT fallback failed: {gpt_err}")
+            save_to_unhandled(filename, raw_bytes)
+            raise RuntimeError("No parser found and GPT fallback failed.")
 
-        return JSONResponse({"message": f"Report sent to {sender}."})
+def send_report(to_email: str, report_bytes: bytes, filename: str):
+    if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
+        raise RuntimeError("Missing Mailgun config: MAILGUN_DOMAIN or MAILGUN_API_KEY")
 
-    except Exception as e:
-        error_msg = str(e)
-        traceback.print_exc()
-        sender = sender if "sender" in locals() else "unknown"
-        subject = subject if "subject" in locals() else "Unknown"
-        filename = filename if "filename" in locals() else "unknown"
+    response = requests.post(
+        f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
+        auth=("api", MAILGUN_API_KEY),
+        files=[("attachment", (filename, report_bytes))],
+        data={
+            "from": f"SpotIQ <mailer@{MAILGUN_DOMAIN}>",
+            "to": [to_email],
+            "subject": "Your SpotIQ Matched Report",
+            "text": "Attached is your SpotIQ match report as a CSV file."
+        }
+    )
 
-        update_job_status(job_id, "failed", error_message=error_msg)
-        send_error_report(sender, filename, subject, error_msg)
+    if response.status_code != 200:
+        raise RuntimeError(f"Failed to send email: {response.status_code} - {response.text}")
 
-        return JSONResponse({"error": error_msg}, status_code=500)
+def send_error_report(to_email: str, filename: str, subject: str, error_message: str):
+    if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
+        raise RuntimeError("Missing Mailgun config: MAILGUN_DOMAIN or MAILGUN_API_KEY")
+
+    message = f"""We were unable to process your file.
+
+File: {filename}
+Subject: {subject}
+
+Error:
+{error_message}
+
+Please review and try again, or contact support."""
+
+    response = requests.post(
+        f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
+        auth=("api", MAILGUN_API_KEY),
+        data={
+            "from": f"SpotIQ <mailer@{MAILGUN_DOMAIN}>",
+            "to": [to_email],
+            "subject": "SpotIQ Processing Failed",
+            "text": message
+        }
+    )
+
+    if response.status_code != 200:
+        raise RuntimeError(f"Failed to send error email: {response.status_code} - {response.text}")
