@@ -8,15 +8,12 @@ from main_parser import get_parser_output, save_to_unhandled
 from parsers_registry import compute_fingerprint
 from load_parsers import load_all_parsers
 from parser_trainer import handle_unprocessed_files
+from job_logger import update_job_status
 
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
 
-def process_email_attachment(raw_bytes: bytes, filename: str) -> pd.DataFrame:
-    """
-    Attempt to process using a fingerprinted parser. If not found, fallback to GPT.
-    Always save unhandled logs, even when GPT succeeds.
-    """
+def process_email_attachment(raw_bytes: bytes, filename: str):
     try:
         print("[process_email_attachment] Attempting parser match...")
         raw_text = raw_bytes.decode("utf-8", errors="ignore")
@@ -28,7 +25,7 @@ def process_email_attachment(raw_bytes: bytes, filename: str) -> pd.DataFrame:
 
         df = get_parser_output(parser_func, raw_text)
         print("[process_email_attachment] Matched parser succeeded.")
-        return df
+        return df, "parser", f"{fingerprint}.py"
 
     except Exception as parser_err:
         print(f"[process_email_attachment] No parser matched: {parser_err}")
@@ -39,20 +36,16 @@ def process_email_attachment(raw_bytes: bytes, filename: str) -> pd.DataFrame:
             df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True, errors='coerce')
             df.dropna(subset=['timestamp'], inplace=True)
 
-            # Save raw file for later training even though GPT succeeded
             save_to_unhandled(filename, raw_bytes)
-
-            # Trigger retraining in the background
             threading.Thread(target=handle_unprocessed_files, daemon=True).start()
 
             print("[process_email_attachment] Fallback to GPT succeeded.")
-            return df
+            return df, "gpt", None
 
         except Exception as gpt_err:
             print(f"[process_email_attachment] GPT fallback failed: {gpt_err}")
             save_to_unhandled(filename, raw_bytes)
             raise RuntimeError("No parser found and GPT fallback failed.")
-
 
 def send_report(to_email: str, report_bytes: bytes, filename: str):
     if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
@@ -72,7 +65,6 @@ def send_report(to_email: str, report_bytes: bytes, filename: str):
 
     if response.status_code != 200:
         raise RuntimeError(f"Failed to send email: {response.status_code} - {response.text}")
-
 
 def send_error_report(to_email: str, filename: str, subject: str, error_message: str):
     if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
