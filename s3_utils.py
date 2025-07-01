@@ -7,6 +7,9 @@ import os
 AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
 S3_BUCKET = os.getenv("S3_BUCKET_NAME")
 
+print("[DEBUG] AWS_ACCESS_KEY_ID =", repr(os.getenv("AWS_ACCESS_KEY_ID")))
+print("[DEBUG] AWS_SECRET_ACCESS_KEY =", repr(os.getenv("AWS_SECRET_ACCESS_KEY")))
+
 # Debug print to confirm credentials are being picked up
 aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
 aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
