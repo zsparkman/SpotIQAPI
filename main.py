@@ -6,6 +6,9 @@ import uuid
 import traceback
 import requests
 from datetime import datetime, timedelta
+import boto3
+import os
+import json
 
 app = FastAPI()
 init_db()
@@ -15,16 +18,69 @@ def read_root():
     return {"message": "SpotIQ API is live"}
 
 @app.get("/jobs")
-def list_jobs():
+def list_jobs(status: str = None, parsed_by: str = None):
     jobs = get_all_jobs()
-    html = "<h1>SpotIQ Job Log</h1><table border='1'><tr><th>Job ID</th><th>Sender</th><th>Subject</th><th>Filename</th><th>Status</th><th>Created At</th><th>Updated At</th><th>Error</th></tr>"
+    if status:
+        jobs = [j for j in jobs if j[4] == status]
+    if parsed_by:
+        jobs = [j for j in jobs if j[9] == parsed_by]
+
+    html = (
+        "<h1>SpotIQ Job Log</h1><table border='1'>"
+        "<tr><th>Job ID</th><th>Sender</th><th>Subject</th><th>Filename</th><th>Status</th>"
+        "<th>Created At</th><th>Updated At</th><th>Error</th><th>Last Rebuild</th>"
+        "<th>Parsed By</th><th>Parser Name</th><th>Duration (s)</th></tr>"
+    )
     for job in jobs:
         html += "<tr>" + "".join(f"<td>{c or ''}</td>" for c in job) + "</tr>"
     html += "</table>"
     return HTMLResponse(content=html)
 
+@app.get("/events")
+def list_events(event_type: str = None, job_id: str = None):
+    s3 = boto3.client(
+        "s3",
+        region_name=os.getenv("AWS_REGION", "us-east-2"),
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+    )
+    bucket = os.getenv("S3_BUCKET_NAME")
+    prefix = "event_logs/"
+    paginator = s3.get_paginator("list_objects_v2")
+    page_iterator = paginator.paginate(Bucket=bucket, Prefix=prefix)
+
+    all_events = []
+    for page in page_iterator:
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if not key.endswith(".jsonl"):
+                continue
+            obj_data = s3.get_object(Bucket=bucket, Key=key)
+            lines = obj_data["Body"].read().decode("utf-8").splitlines()
+            for line in lines:
+                try:
+                    event = json.loads(line)
+                    all_events.append(event)
+                except Exception:
+                    continue
+
+    if event_type:
+        all_events = [e for e in all_events if e.get("event_type") == event_type]
+    if job_id:
+        all_events = [e for e in all_events if e.get("job_id") == job_id]
+
+    html = "<h1>SpotIQ Event Log</h1><table border='1'><tr><th>Timestamp</th><th>Event Type</th><th>Job ID</th><th>Details</th></tr>"
+    for event in sorted(all_events, key=lambda e: e["timestamp"], reverse=True):
+        html += (
+            f"<tr><td>{event['timestamp']}</td><td>{event['event_type']}</td>"
+            f"<td>{event.get('job_id', '')}</td><td><pre>{json.dumps(event.get('details', {}), indent=2)}</pre></td></tr>"
+        )
+    html += "</table>"
+    return HTMLResponse(content=html)
+
 @app.post("/email-inbound")
 async def email_inbound(request: Request):
+    job_id = str(uuid.uuid4())
     try:
         form = await request.form()
         sender = form.get("sender", "unknown").strip()
@@ -46,7 +102,6 @@ async def email_inbound(request: Request):
             send_error_report(sender, filename, subject, reason)
             return JSONResponse({"error": reason}, status_code=400)
 
-        job_id = str(uuid.uuid4())
         log_job(job_id, sender, subject, filename)
         print(f"[email_inbound] Processing job {job_id} from {sender} - {filename}")
 
@@ -60,7 +115,6 @@ async def email_inbound(request: Request):
     except Exception as e:
         error_msg = str(e)
         traceback.print_exc()
-        job_id = job_id if "job_id" in locals() else str(uuid.uuid4())
         sender = sender if "sender" in locals() else "unknown"
         subject = subject if "subject" in locals() else "Unknown"
         filename = filename if "filename" in locals() else "unknown"
