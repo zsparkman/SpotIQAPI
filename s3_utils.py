@@ -21,11 +21,11 @@ if not all([aws_access_key, aws_secret_key, AWS_REGION, S3_BUCKET]):
 # Initialize S3 client
 try:
     s3_client = boto3.client(
-    "s3",
-    region_name=AWS_REGION,
-    aws_access_key_id=aws_access_key,
-    aws_secret_access_key=aws_secret_key,
-)
+        "s3",
+        region_name=AWS_REGION,
+        aws_access_key_id=aws_access_key,
+        aws_secret_access_key=aws_secret_key,
+    )
 except Exception as e:
     print(f"[S3_UTILS] Failed to initialize S3 client: {e}")
     raise
@@ -37,12 +37,4 @@ def upload_unhandled_log(filename: str, content: bytes) -> str:
     if not all([aws_access_key, aws_secret_key]):
         raise RuntimeError("AWS credentials are missing in environment.")
 
-    key = f"unhandled_logs/{filename}"
-
-    try:
-        s3_client.put_object(Bucket=S3_BUCKET, Key=key, Body=content)
-        print(f"[S3] Uploaded to s3://{S3_BUCKET}/{key}")
-        return f"s3://{S3_BUCKET}/{key}"
-    except Exception as e:
-        print(f"[S3_UTILS] Upload failed: {e}")
-        raise
+    key = f"unhandled_logs/{fi_
