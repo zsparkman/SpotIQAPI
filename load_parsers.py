@@ -2,6 +2,7 @@ import os
 import importlib.util
 import boto3
 import tempfile
+from job_logger import log_event
 
 AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
 S3_BUCKET = os.getenv("S3_BUCKET_NAME")
@@ -41,5 +42,7 @@ def load_all_parsers():
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         parser_map[module_name] = module.parse
+
+        log_event("parser_loaded", details={"module_name": module_name})
 
     return parser_map
