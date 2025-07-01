@@ -14,7 +14,9 @@ UNHANDLED_PREFIX = "unhandled_logs/"
 HANDLED_PREFIX = "handled_logs/"
 
 PARSERS_DIR = "parsers"
+FAILED_DIR = "failed_parsers"
 os.makedirs(PARSERS_DIR, exist_ok=True)
+os.makedirs(FAILED_DIR, exist_ok=True)
 
 aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
 aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
@@ -28,20 +30,24 @@ s3_client = boto3.client(
 client = openai.OpenAI()
 
 def generate_parser_code(columns: list) -> str:
+    col_list = ", ".join(columns)
     prompt = f"""You are a Python developer.
 
-Write a Python function called `parse` that takes a pandas DataFrame as input and returns a new DataFrame with only these columns: {columns}.
+Write a Python function called `parse` that takes a pandas DataFrame as input and returns a cleaned DataFrame.
+The returned DataFrame must include these exact columns: {col_list}.
 
-The function should:
-- Drop any completely empty rows
+Your function must:
+- Drop completely empty rows
 - Normalize column names to lowercase
-- Rename them exactly to: {columns}
+- Rename columns to exactly: {col_list}
 
-Return ONLY the Python code that defines the function."""
+Wrap the function in valid Python syntax and indent properly.
+Do not use markdown or explanation — only valid Python code.
+"""
     response = client.chat.completions.create(
         model="gpt-4-turbo",
         messages=[
-            {"role": "system", "content": "You are a helpful assistant that writes clean and functional pandas code."},
+            {"role": "system", "content": "You write clean Python code using pandas."},
             {"role": "user", "content": prompt}
         ]
     )
@@ -88,6 +94,10 @@ def handle_unprocessed_files():
                 compile(parser_code, "<generated_parser>", "exec")
             except SyntaxError as e:
                 print(f"[trainer] Invalid parser skipped: {e}")
+                fingerprint = fingerprint_csv(df)
+                fail_path = os.path.join(FAILED_DIR, f"{fingerprint}.py")
+                with open(fail_path, "w") as f:
+                    f.write(parser_code)
                 continue
 
             fingerprint = fingerprint_csv(df)
