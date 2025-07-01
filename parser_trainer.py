@@ -5,6 +5,7 @@ import hashlib
 from main_parser import get_parser_output, save_to_unhandled
 from parsers_registry import compute_fingerprint
 from s3_utils import upload_parser_module
+from job_logger import update_job_status
 import boto3
 from io import BytesIO
 import re
@@ -124,6 +125,19 @@ def handle_unprocessed_files():
 
             new_key = f"{HANDLED_PREFIX}{safe_filename}"
             move_s3_object(key, new_key)
+
+            # Attempt to extract job_id from filename if named like job_<id>_something.csv
+            job_id = None
+            if safe_filename.startswith("job_") and "_" in safe_filename:
+                parts = safe_filename.split("_")
+                if len(parts) > 1:
+                    job_id = parts[1]
+
+            if job_id:
+                try:
+                    update_job_status(job_id, "completed", rebuilt=True)
+                except Exception as e:
+                    print(f"[trainer] Failed to mark job {job_id} as rebuilt: {e}")
 
             print(f"[trainer] Trained and uploaded parser: {parser_filename}")
 
