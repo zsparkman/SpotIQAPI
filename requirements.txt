@@ -9,3 +9,4 @@ openpyxl
 python-dotenv
 openai
 PyGithub
+boto3>=1.34.0
