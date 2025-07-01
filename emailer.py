@@ -4,7 +4,7 @@ import pandas as pd
 import requests
 from parser import parse_with_gpt
 from main_parser import get_parser_output, save_to_unhandled
-from parsers_registry import get_parser_for_content
+from parsers_registry import compute_fingerprint
 from load_parsers import load_all_parsers
 
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
@@ -13,21 +13,22 @@ MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
 
 def process_email_attachment(raw_bytes: bytes, filename: str) -> pd.DataFrame:
     """
-    Attempt to process using a registered parser. If no parser matches, fallback to GPT.
-    Save unhandled logs even when GPT succeeds.
+    Attempt to process using a fingerprinted parser. If not found, fallback to GPT.
+    Always save unhandled logs, even when GPT succeeds.
     """
     try:
         print("[process_email_attachment] Attempting parser match...")
         raw_text = raw_bytes.decode("utf-8", errors="ignore")
-        parser_name = get_parser_for_content(raw_text)
-        if not parser_name:
-            raise ValueError("No matching parser in registry.")
-        parser_func = load_all_parsers().get(parser_name)
+        fingerprint = compute_fingerprint(raw_text)
+        parser_func = load_all_parsers().get(fingerprint)
+
         if not parser_func:
-            raise ValueError(f"Parser function '{parser_name}' not found.")
+            raise ValueError(f"No parser found for fingerprint: {fingerprint}")
+
         df = get_parser_output(parser_func, raw_text)
         print("[process_email_attachment] Matched parser succeeded.")
         return df
+
     except Exception as parser_err:
         print(f"[process_email_attachment] No parser matched: {parser_err}")
         try:
@@ -42,6 +43,7 @@ def process_email_attachment(raw_bytes: bytes, filename: str) -> pd.DataFrame:
 
             print("[process_email_attachment] Fallback to GPT succeeded.")
             return df
+
         except Exception as gpt_err:
             print(f"[process_email_attachment] GPT fallback failed: {gpt_err}")
             save_to_unhandled(filename, raw_bytes)
