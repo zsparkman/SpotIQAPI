@@ -1,12 +1,7 @@
-# parser.py
-
 import openai
 import os
 
 def parse_with_gpt(raw_text: str) -> str:
-    """
-    Takes raw CSV-like text, sends it to GPT to return a cleaned CSV string.
-    """
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("Missing OPENAI_API_KEY in environment.")
@@ -27,7 +22,7 @@ Raw CSV input:
 Clean and standardize the output as CSV:"""
 
     response = client.chat.completions.create(
-        model="gpt-4-turbo",  # Using GPT-4 Turbo for better performance
+        model="gpt-4-turbo",
         messages=[
             {"role": "system", "content": "You are a CSV data cleaner."},
             {"role": "user", "content": prompt}
