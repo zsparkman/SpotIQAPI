@@ -37,4 +37,25 @@ def upload_unhandled_log(filename: str, content: bytes) -> str:
     if not all([aws_access_key, aws_secret_key]):
         raise RuntimeError("AWS credentials are missing in environment.")
 
-    key = f"unhandled_logs/{fi_
+    key = f"unhandled_logs/{filename}"
+
+    try:
+        s3_client.put_object(Bucket=S3_BUCKET, Key=key, Body=content)
+        print(f"[S3] Uploaded to s3://{S3_BUCKET}/{key}")
+        return f"s3://{S3_BUCKET}/{key}"
+    except Exception as e:
+        print(f"[S3_UTILS] Upload failed: {e}")
+        raise
+
+def upload_parser_module(filename: str, content: bytes) -> str:
+    """
+    Uploads a parser .py file to S3 under 'parser_modules/' prefix.
+    """
+    key = f"parser_modules/{filename}"
+    try:
+        s3_client.put_object(Bucket=S3_BUCKET, Key=key, Body=content)
+        print(f"[S3] Uploaded parser module to s3://{S3_BUCKET}/{key}")
+        return f"s3://{S3_BUCKET}/{key}"
+    except Exception as e:
+        print(f"[S3_UTILS] Failed to upload parser module: {e}")
+        raise
