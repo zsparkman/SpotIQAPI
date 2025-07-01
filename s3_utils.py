@@ -20,7 +20,12 @@ if not all([aws_access_key, aws_secret_key, AWS_REGION, S3_BUCKET]):
 
 # Initialize S3 client
 try:
-    s3_client = boto3.client("s3", region_name=AWS_REGION)
+    s3_client = boto3.client(
+    "s3",
+    region_name=AWS_REGION,
+    aws_access_key_id=aws_access_key,
+    aws_secret_access_key=aws_secret_key,
+)
 except Exception as e:
     print(f"[S3_UTILS] Failed to initialize S3 client: {e}")
     raise
