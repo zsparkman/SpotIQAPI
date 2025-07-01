@@ -8,7 +8,6 @@ from main_parser import get_parser_output, save_to_unhandled
 from parsers_registry import compute_fingerprint
 from load_parsers import load_all_parsers
 from parser_trainer import handle_unprocessed_files
-from job_logger import update_job_status
 
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
@@ -49,7 +48,7 @@ def process_email_attachment(raw_bytes: bytes, filename: str):
 
 def send_report(to_email: str, report_bytes: bytes, filename: str):
     if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
-        raise RuntimeError("Missing Mailgun config: MAILGUN_DOMAIN or MAILGUN_API_KEY")
+        raise RuntimeError("Missing Mailgun config")
 
     response = requests.post(
         f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
@@ -62,13 +61,12 @@ def send_report(to_email: str, report_bytes: bytes, filename: str):
             "text": "Attached is your SpotIQ match report as a CSV file."
         }
     )
-
     if response.status_code != 200:
         raise RuntimeError(f"Failed to send email: {response.status_code} - {response.text}")
 
 def send_error_report(to_email: str, filename: str, subject: str, error_message: str):
     if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
-        raise RuntimeError("Missing Mailgun config: MAILGUN_DOMAIN or MAILGUN_API_KEY")
+        raise RuntimeError("Missing Mailgun config")
 
     message = f"""We were unable to process your file.
 
@@ -90,6 +88,5 @@ Please review and try again, or contact support."""
             "text": message
         }
     )
-
     if response.status_code != 200:
         raise RuntimeError(f"Failed to send error email: {response.status_code} - {response.text}")
