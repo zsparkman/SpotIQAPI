@@ -34,8 +34,7 @@ def _save_job_log(jobs):
         print(f"[job_logger] Failed to save job log: {e}")
 
 def init_db():
-    # No-op to preserve compatibility with interface
-    pass
+    pass  # no-op for compatibility
 
 def log_job(job_id, sender, subject, filename):
     jobs = _load_job_log()
@@ -49,11 +48,13 @@ def log_job(job_id, sender, subject, filename):
         "created_at": now,
         "updated_at": now,
         "last_rebuild": None,
-        "error": None
+        "error": None,
+        "parsed_by": None,      # 'parser' or 'gpt'
+        "parser_name": None     # matched or generated filename
     })
     _save_job_log(jobs)
 
-def update_job_status(job_id, status, error_message=None, rebuilt=False):
+def update_job_status(job_id, status, error_message=None, rebuilt=False, parsed_by=None, parser_name=None):
     jobs = _load_job_log()
     now = datetime.utcnow().isoformat()
     for job in jobs:
@@ -64,6 +65,10 @@ def update_job_status(job_id, status, error_message=None, rebuilt=False):
                 job["error"] = error_message
             if rebuilt:
                 job["last_rebuild"] = now
+            if parsed_by:
+                job["parsed_by"] = parsed_by
+            if parser_name:
+                job["parser_name"] = parser_name
             break
     _save_job_log(jobs)
 
@@ -78,7 +83,9 @@ def get_all_jobs():
             job["created_at"],
             job["updated_at"],
             job["error"],
-            job.get("last_rebuild", "")
+            job.get("last_rebuild", ""),
+            job.get("parsed_by", ""),
+            job.get("parser_name", "")
         )
         for job in _load_job_log()
     ]
