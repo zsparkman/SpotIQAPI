@@ -2,33 +2,36 @@ import os
 import hashlib
 import pandas as pd
 
-UNHANDLED_LOGS_DIR = "unhandled_logs"
-HANDLED_LOGS_DIR = "handled_logs"
 PARSERS_DIR = "parsers"
 
-os.makedirs(UNHANDLED_LOGS_DIR, exist_ok=True)
-os.makedirs(HANDLED_LOGS_DIR, exist_ok=True)
-os.makedirs(PARSERS_DIR, exist_ok=True)
+def fingerprint_csv(df) -> str:
+    norm = ",".join(sorted(col.strip().lower() for col in df.columns))
+    return hashlib.md5(norm.encode("utf-8")).hexdigest()
 
-def fingerprint_csv(content: str) -> str:
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+def save_parser_to_repo(fingerprint: str, parser_code: str) -> str:
+    if not os.path.exists(PARSERS_DIR):
+        os.makedirs(PARSERS_DIR)
 
-def save_to_unhandled(filename: str, content: str):
-    path = os.path.join(UNHANDLED_LOGS_DIR, filename)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
-
-def get_parser_output(parser_module, raw_text: str) -> str:
-    return parser_module.parse(raw_text)
-
-def save_parser_to_repo(fingerprint: str, code: str):
     filename = f"{fingerprint}.py"
-    path = os.path.join(PARSERS_DIR, filename)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(code)
+    filepath = os.path.join(PARSERS_DIR, filename)
 
-def mark_log_handled(filename: str):
-    src = os.path.join(UNHANDLED_LOGS_DIR, filename)
-    dst = os.path.join(HANDLED_LOGS_DIR, filename)
-    if os.path.exists(src):
-        os.rename(src, dst)
+    with open(filepath, "w") as f:
+        f.write(parser_code)
+
+    return filepath
+
+def save_to_unhandled(filename: str, content: bytes):
+    unhandled_dir = "unhandled_logs"
+    if not os.path.exists(unhandled_dir):
+        os.makedirs(unhandled_dir)
+
+    filepath = os.path.join(unhandled_dir, filename)
+    with open(filepath, "wb") as f:
+        f.write(content)
+    print(f"[↪] Saved unhandled log to {filepath}")
+
+def get_parser_output(parser_func, raw_text: str) -> pd.DataFrame:
+    df = parser_func(raw_text)
+    if not isinstance(df, pd.DataFrame):
+        raise ValueError("Parser function did not return a DataFrame.")
+    return df
