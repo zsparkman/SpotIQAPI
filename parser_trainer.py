@@ -10,8 +10,8 @@ import re
 
 AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
 S3_BUCKET = os.getenv("S3_BUCKET_NAME")
-UNHANDLED_PREFIX = "spotiq-data/unhandled_logs/"
-HANDLED_PREFIX = "spotiq-data/handled_logs/"
+UNHANDLED_PREFIX = "unhandled_logs/"
+HANDLED_PREFIX = "handled_logs/"
 
 PARSERS_DIR = "parsers"
 os.makedirs(PARSERS_DIR, exist_ok=True)
@@ -84,7 +84,6 @@ def handle_unprocessed_files():
             columns = list(df.columns)
             parser_code = generate_parser_code(columns)
 
-            # Validate before saving
             try:
                 compile(parser_code, "<generated_parser>", "exec")
             except SyntaxError as e:
