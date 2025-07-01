@@ -5,6 +5,7 @@ from emailer import process_email_attachment, send_report, send_error_report
 from job_logger import log_job
 import uuid
 import traceback
+import io
 
 app = FastAPI()
 
@@ -37,7 +38,8 @@ async def email_inbound(request: Request, file: UploadFile = File(...)):
         file_bytes = await file.read()
         df = process_email_attachment(file_bytes, filename)
         print(f"[email_inbound] Processed DataFrame: {df.head()}")
-        send_report(sender, df, filename, subject)
+        csv_bytes = df.to_csv(index=False).encode("utf-8")
+        send_report(sender, csv_bytes, filename)
         log_job(job_id, sender, subject, filename, "success")
         return JSONResponse(content={"message": "File processed successfully."}, status_code=200)
     except Exception as e:
