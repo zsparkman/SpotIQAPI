@@ -4,6 +4,8 @@ import pandas as pd
 import requests
 from parser import parse_with_gpt
 from main_parser import get_parser_output, save_to_unhandled
+from parsers_registry import get_parser_for_content
+from load_parsers import load_all_parsers
 
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
@@ -11,12 +13,19 @@ MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
 
 def process_email_attachment(raw_bytes: bytes, filename: str) -> pd.DataFrame:
     """
-    Attempt to process using parser. If no parser matches, fallback to GPT.
+    Attempt to process using a registered parser. If no parser matches, fallback to GPT.
     Save unhandled logs even when GPT succeeds.
     """
     try:
         print("[process_email_attachment] Attempting parser match...")
-        df = get_parser_output(raw_bytes)
+        raw_text = raw_bytes.decode("utf-8", errors="ignore")
+        parser_name = get_parser_for_content(raw_text)
+        if not parser_name:
+            raise ValueError("No matching parser in registry.")
+        parser_func = load_all_parsers().get(parser_name)
+        if not parser_func:
+            raise ValueError(f"Parser function '{parser_name}' not found.")
+        df = get_parser_output(parser_func, raw_text)
         print("[process_email_attachment] Matched parser succeeded.")
         return df
     except Exception as parser_err:
@@ -40,9 +49,6 @@ def process_email_attachment(raw_bytes: bytes, filename: str) -> pd.DataFrame:
 
 
 def send_report(to_email: str, report_bytes: bytes, filename: str):
-    """
-    Sends the matched report as an attachment back to the sender via Mailgun.
-    """
     if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
         raise RuntimeError("Missing Mailgun config: MAILGUN_DOMAIN or MAILGUN_API_KEY")
 
@@ -63,9 +69,6 @@ def send_report(to_email: str, report_bytes: bytes, filename: str):
 
 
 def send_error_report(to_email: str, filename: str, subject: str, error_message: str):
-    """
-    Sends an error message email to the user.
-    """
     if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
         raise RuntimeError("Missing Mailgun config: MAILGUN_DOMAIN or MAILGUN_API_KEY")
 
