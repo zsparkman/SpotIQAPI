@@ -2,14 +2,15 @@ import io
 import os
 import pandas as pd
 import requests
+import threading
 from parser import parse_with_gpt
 from main_parser import get_parser_output, save_to_unhandled
 from parsers_registry import compute_fingerprint
 from load_parsers import load_all_parsers
+from parser_trainer import handle_unprocessed_files
 
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN")
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
-
 
 def process_email_attachment(raw_bytes: bytes, filename: str) -> pd.DataFrame:
     """
@@ -40,6 +41,9 @@ def process_email_attachment(raw_bytes: bytes, filename: str) -> pd.DataFrame:
 
             # Save raw file for later training even though GPT succeeded
             save_to_unhandled(filename, raw_bytes)
+
+            # Trigger retraining in the background
+            threading.Thread(target=handle_unprocessed_files, daemon=True).start()
 
             print("[process_email_attachment] Fallback to GPT succeeded.")
             return df
