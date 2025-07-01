@@ -24,7 +24,7 @@ except Exception as e:
     raise
 
 def upload_unhandled_log(filename: str, content: bytes) -> str:
-    key = f"spotiq-data/unhandled_logs/{filename}"
+    key = f"unhandled_logs/{filename}"
     try:
         s3_client.put_object(Bucket=S3_BUCKET, Key=key, Body=content)
         print(f"[S3] Uploaded to s3://{S3_BUCKET}/{key}")
@@ -34,7 +34,7 @@ def upload_unhandled_log(filename: str, content: bytes) -> str:
         raise
 
 def upload_parser_module(filename: str, content: bytes) -> str:
-    key = f"spotiq-data/parser_modules/{filename}"
+    key = f"parser_modules/{filename}"
     try:
         s3_client.put_object(Bucket=S3_BUCKET, Key=key, Body=content)
         print(f"[S3] Uploaded parser module to s3://{S3_BUCKET}/{key}")
