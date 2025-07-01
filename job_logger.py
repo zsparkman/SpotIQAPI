@@ -34,7 +34,7 @@ def _save_job_log(jobs):
         print(f"[job_logger] Failed to save job log: {e}")
 
 def init_db():
-    # No-op to preserve compatibility
+    # No-op to preserve compatibility with interface
     pass
 
 def log_job(job_id, sender, subject, filename):
@@ -44,4 +44,41 @@ def log_job(job_id, sender, subject, filename):
         "job_id": job_id,
         "sender": sender,
         "subject": subject,
-        "filen
+        "filename": filename,
+        "status": "processing",
+        "created_at": now,
+        "updated_at": now,
+        "last_rebuild": None,
+        "error": None
+    })
+    _save_job_log(jobs)
+
+def update_job_status(job_id, status, error_message=None, rebuilt=False):
+    jobs = _load_job_log()
+    now = datetime.utcnow().isoformat()
+    for job in jobs:
+        if job["job_id"] == job_id:
+            job["status"] = status
+            job["updated_at"] = now
+            if error_message:
+                job["error"] = error_message
+            if rebuilt:
+                job["last_rebuild"] = now
+            break
+    _save_job_log(jobs)
+
+def get_all_jobs():
+    return [
+        (
+            job["job_id"],
+            job["sender"],
+            job["subject"],
+            job["filename"],
+            job["status"],
+            job["created_at"],
+            job["updated_at"],
+            job["error"],
+            job.get("last_rebuild", "")
+        )
+        for job in _load_job_log()
+    ]
