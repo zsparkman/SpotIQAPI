@@ -91,4 +91,15 @@ def handle_unprocessed_files():
                 f.write(parser_code)
 
             with open(parser_path, "rb") as f:
-                upload_parser_module(parser_f_
+                upload_parser_module(parser_filename, f.read())
+
+            new_key = f"{HANDLED_PREFIX}{safe_filename}"
+            move_s3_object(key, new_key)
+
+            print(f"[trainer] Trained and uploaded parser: {parser_filename}")
+
+        except Exception as e:
+            print(f"[trainer] ERROR handling {filename}: {e}")
+
+if __name__ == "__main__":
+    handle_unprocessed_files()
