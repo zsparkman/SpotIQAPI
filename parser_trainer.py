@@ -10,6 +10,7 @@ import base64
 from github import Github
 import boto3
 from io import BytesIO
+import re
 
 # === Environment setup ===
 AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
@@ -78,7 +79,11 @@ def move_s3_object(old_key, new_key):
 
 
 def sanitize_filename(name: str) -> str:
-    return "".join(c if c.isalnum() or c in "-_.()" else "_" for c in name)
+    # Remove problematic characters for GitHub paths
+    name = name.strip()
+    name = re.sub(r"[^\w\-.()]", "_", name)
+    name = name.replace("..", "_")  # block path traversal
+    return name
 
 
 def handle_unprocessed_files():
