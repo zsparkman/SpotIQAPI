@@ -5,7 +5,6 @@ import requests
 import threading
 from parser import parse_with_gpt
 from main_parser import get_parser_output, save_to_unhandled
-from parsers_registry import compute_fingerprint
 from load_parsers import load_all_parsers
 from parser_trainer import handle_unprocessed_files
 
@@ -16,15 +15,22 @@ def process_email_attachment(raw_bytes: bytes, filename: str):
     try:
         print("[process_email_attachment] Attempting parser match...")
         raw_text = raw_bytes.decode("utf-8", errors="ignore")
-        fingerprint = compute_fingerprint(raw_text)
-        parser_func = load_all_parsers().get(fingerprint)
+        parsers = load_all_parsers()
 
-        if not parser_func:
-            raise ValueError(f"No parser found for fingerprint: {fingerprint}")
+        for name, parser_func in parsers.items():
+            try:
+                df = get_parser_output(parser_func, raw_text)
+                if isinstance(df, pd.DataFrame) and df.shape[1] >= 2:
+                    if "timestamp" in df.columns:
+                        df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True, errors='coerce')
+                        df.dropna(subset=['timestamp'], inplace=True)
+                    print(f"[process_email_attachment] Matched parser: {name}")
+                    return df, "parser", f"{name}.py"
+            except Exception as e:
+                print(f"[parser test] Failed on {name}: {e}")
+                continue
 
-        df = get_parser_output(parser_func, raw_text)
-        print("[process_email_attachment] Matched parser succeeded.")
-        return df, "parser", f"{fingerprint}.py"
+        raise ValueError("No parser matched any known structure.")
 
     except Exception as parser_err:
         print(f"[process_email_attachment] No parser matched: {parser_err}")
@@ -50,43 +56,4 @@ def send_report(to_email: str, report_bytes: bytes, filename: str):
     if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
         raise RuntimeError("Missing Mailgun config")
 
-    response = requests.post(
-        f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
-        auth=("api", MAILGUN_API_KEY),
-        files=[("attachment", (filename, report_bytes))],
-        data={
-            "from": f"SpotIQ <mailer@{MAILGUN_DOMAIN}>",
-            "to": [to_email],
-            "subject": "Your SpotIQ Matched Report",
-            "text": "Attached is your SpotIQ match report as a CSV file."
-        }
-    )
-    if response.status_code != 200:
-        raise RuntimeError(f"Failed to send email: {response.status_code} - {response.text}")
-
-def send_error_report(to_email: str, filename: str, subject: str, error_message: str):
-    if not MAILGUN_DOMAIN or not MAILGUN_API_KEY:
-        raise RuntimeError("Missing Mailgun config")
-
-    message = f"""We were unable to process your file.
-
-File: {filename}
-Subject: {subject}
-
-Error:
-{error_message}
-
-Please review and try again, or contact support."""
-
-    response = requests.post(
-        f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
-        auth=("api", MAILGUN_API_KEY),
-        data={
-            "from": f"SpotIQ <mailer@{MAILGUN_DOMAIN}>",
-            "to": [to_email],
-            "subject": "SpotIQ Processing Failed",
-            "text": message
-        }
-    )
-    if response.status_code != 200:
-        raise RuntimeError(f"Failed to send error email: {response.status_code} - {response.text}")
+    r
