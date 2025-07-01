@@ -15,7 +15,7 @@ def read_root():
 @app.get("/jobs")
 def list_jobs():
     jobs = get_all_jobs()
-    html = "<h1>SpotIQ Job Log</h1><table border='1'><tr><th>Job ID</th><th>Sender</th><th>Subject</th><th>Filename</th><th>Status</th><th>Created At</th><th>Updated At</th><th>Error</th></tr>"
+    html = "<h1>SpotIQ Job Log</h1><table border='1'><tr><th>Job ID</th><th>Sender</th><th>Subject</th><th>Filename</th><th>Status</th><th>Created At</th><th>Updated At</th><th>Error</th><th>Last Rebuild</th></tr>"
     for job in jobs:
         html += "<tr>" + "".join(f"<td>{c or ''}</td>" for c in job) + "</tr>"
     html += "</table>"
