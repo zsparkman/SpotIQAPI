@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 from emailer import process_email_attachment, send_report, send_error_report
-from job_logger import init_db, log_job, update_job_status, get_all_jobs
+from job_logger import log_job, update_job_status, get_all_jobs
 import uuid
 import traceback
 import requests
@@ -11,7 +11,6 @@ import os
 import json
 
 app = FastAPI()
-init_db()
 
 @app.get("/")
 def read_root():
